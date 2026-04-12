@@ -10,13 +10,13 @@ import (
 	"time"
 )
 
-// CohereClient interfaces with the Cohere Command API
+// CohereClient concentra a integração com a API do Cohere.
 type CohereClient struct {
 	apiKey string
 	client *http.Client
 }
 
-// NewCohereClient loads the client with credentials mapped from .env
+// NewCohereClient carrega o cliente com as credenciais do .env.
 func NewCohereClient() *CohereClient {
 	return &CohereClient{
 		apiKey: os.Getenv("COHERE_API_KEY"),
@@ -35,8 +35,8 @@ type cohereChatResponse struct {
 	Text string `json:"text"`
 }
 
-// ClassifyEmail checks an email body and parses it as "REJEICAO" or "ENTREVISTA" or "OUTRO".
-// Task 53
+// ClassifyEmail classifica o corpo de um email como REJEICAO, ENTREVISTA ou OUTRO.
+// Tarefa 53
 func (c *CohereClient) ClassifyEmail(body string) (string, error) {
 	if c.apiKey == "" {
 		return "OUTRO", fmt.Errorf("COHERE_API_KEY not defined")
@@ -84,12 +84,12 @@ Respond directly with ONLY ONE of these three strict labels: "REJEICAO", "ENTREV
 		return "OUTRO", err
 	}
 
-	// Cohere will return exactly the word
+	// O Cohere devolve exatamente a palavra classificada.
 	return parsed.Text, nil
 }
 
-// GenerateOutreachMessage constructs a highly converting LinkedIn networking message.
-// Task 56: Bypass ATS via Direct Message.
+// GenerateOutreachMessage monta uma mensagem curta para contato direto no LinkedIn.
+// Tarefa 56: contornar o ATS via mensagem direta.
 func (c *CohereClient) GenerateOutreachMessage(recruiterName, roleName string) (string, error) {
 	if c.apiKey == "" {
 		return "", fmt.Errorf("COHERE_API_KEY not defined")
