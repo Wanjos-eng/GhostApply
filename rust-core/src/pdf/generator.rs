@@ -102,7 +102,7 @@ pub fn render_to_pdf(markdown: &str, output_dir: &Path) -> Result<PathBuf> {
 
     // Gerar PDF com printpdf
     let (doc, page1, layer1) = PdfDocument::new("Currículo", Mm(210.0), Mm(297.0), "Layer 1");
-    let current_layer = doc.get_page(page1).get_layer(layer1);
+    let mut current_layer = doc.get_page(page1).get_layer(layer1);
 
     // Usar fonte built-in (Helvetica — sans-serif como definido no CSS)
     let font = doc
@@ -121,7 +121,9 @@ pub fn render_to_pdf(markdown: &str, output_dir: &Path) -> Result<PathBuf> {
 
     for line in &lines {
         if y_pos < 20.0 {
-            break; // proteção contra overflow de página
+            let (new_page, new_layer) = doc.add_page(Mm(210.0), Mm(297.0), "Layer 1");
+            current_layer = doc.get_page(new_page).get_layer(new_layer);
+            y_pos = 270.0_f32; // reseta margem superior
         }
 
         let trimmed = line.trim();
