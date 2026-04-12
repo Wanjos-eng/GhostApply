@@ -5,9 +5,9 @@
 //! Falhar em qualquer DDL reverte tudo — nunca deixa o banco em estado parcial.
 //!
 //! # Tabelas
-//! - `Vaga_Prospectada`   — vagas capturadas de portais (Tarefa 07)
-//! - `Candidatura_Forjada`— candidaturas geradas, FK para Vaga (Tarefa 08)
-//! - `Email_Recrutador`   — e-mails de recrutadores capturados (Tarefa 09)
+//! - `Vaga_Prospectada`   — vagas capturadas de portais
+//! - `Candidatura_Forjada`— candidaturas geradas, FK para Vaga
+//! - `Email_Recrutador`   — e-mails de recrutadores capturados
 
 use anyhow::{Context, Result};
 use rusqlite::Connection;
