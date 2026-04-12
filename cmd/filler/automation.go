@@ -1,7 +1,6 @@
 package main
 
 import (
-	"database/sql"
 	"fmt"
 	"log"
 	"regexp"
@@ -13,8 +12,8 @@ import (
 	"github.com/playwright-community/playwright-go"
 )
 
-// processApplication orchestrates the automation of Tasks 40-49.
-func processApplication(ctx playwright.BrowserContext, database *sql.DB, groqClient *llm.GroqClient, c domain.VagaComCandidatura) error {
+// processApplication executa o fluxo de candidatura automatizada para uma vaga.
+func processApplication(ctx playwright.BrowserContext, groqClient *llm.GroqClient, c domain.VagaComCandidatura) error {
 	page, err := ctx.NewPage()
 	if err != nil {
 		return err
@@ -24,53 +23,53 @@ func processApplication(ctx playwright.BrowserContext, database *sql.DB, groqCli
 	if _, err := page.Goto(c.Vaga.URL, playwright.PageGotoOptions{
 		WaitUntil: playwright.WaitUntilStateDomcontentloaded,
 	}); err != nil {
-		return fmt.Errorf("Task 40: failed to navigate: %w", err)
+		return fmt.Errorf("falha ao navegar até a vaga: %w", err)
 	}
 
 	pw.HumanSleep()
 
-	// Task 41: Click 'Easy Apply' (usually jobs-apply-button)
-	// We'll use a broad text locator for "Easy Apply" or "Apply now"
+	// Tarefa 41: clica em Easy Apply (normalmente jobs-apply-button).
+	// Usa um locator amplo para cobrir variações de "Easy Apply" e "Apply now".
 	applyBtn := page.Locator("button:has-text('Easy Apply')").First()
 	btnCount, err := applyBtn.Count()
 	if err != nil || btnCount == 0 {
-		return fmt.Errorf("Task 41: easy apply button not found (perhaps already applied or external layout changes)")
+		return fmt.Errorf("botão de candidatura rápida não encontrado, possivelmente por mudança de layout ou candidatura já enviada")
 	}
 
 	if err := applyBtn.Click(); err != nil {
-		return fmt.Errorf("Task 41: failed to click Easy Apply: %w", err)
+		return fmt.Errorf("falha ao clicar no botão de candidatura rápida: %w", err)
 	}
 
-	// Pagination loop (Tasks 42-48)
+	// Percorre as etapas do formulário até chegar ao envio final.
 	pageLimit := 10 // Safe guard preventing infinite loops
 	for i := 0; i < pageLimit; i++ {
 		pw.HumanSleep()
 
-		// If we see Application sent overlay, break loop early
+		// Interrompe cedo se o modal de sucesso já apareceu.
 		postApplyConf := page.Locator("text='Application sent'")
 		if cnt, _ := postApplyConf.Count(); cnt > 0 {
 			break
 		}
 
-		// Fill normal text inputs
+		// Preenche os campos de texto do formulário com dados do perfil.
 		if err := fillTextInputs(page, groqClient); err != nil {
 			log.Printf("filler warning: failed mapping text inputs: %v", err)
 		}
 
-		// Handle File Uploads (Task 47)
+		// Anexa o currículo quando o formulário expõe um campo de arquivo.
 		if err := handleFileUpload(page, c.Candidatura.CurriculoPath); err != nil {
 			log.Printf("filler warning: failed attaching file: %v", err)
 		}
 
-		// Handle Next / Format / Review / Submit
+		// Avança pelas etapas intermediárias até encontrar a ação final.
 		nextBtn := page.Locator("button:has-text('Next')").First()
 		reviewBtn := page.Locator("button:has-text('Review')").First()
 		submitBtn := page.Locator("button:has-text('Submit application')").First()
 
 		if ok, _ := submitBtn.IsVisible(); ok {
-			// Task 48: Click Submit!
+			// Envia a candidatura quando o botão final estiver disponível.
 			if err := submitBtn.Click(); err != nil {
-				return fmt.Errorf("Task 48: failed to submit: %w", err)
+				return fmt.Errorf("falha ao enviar a candidatura: %w", err)
 			}
 			pw.HumanSleep()
 			break
@@ -83,24 +82,24 @@ func processApplication(ctx playwright.BrowserContext, database *sql.DB, groqCli
 				log.Printf("filler warn: failed to click next")
 			}
 		} else {
-			// No standard buttons, it's either an arbitrary page load or an unexpected state
+			// Sem botões padrão, a tela provavelmente está em um estado intermediário incomum.
 			pw.HumanSleep()
 		}
 	}
 
 	pw.HumanSleep()
 	
-	// Task 49: Validate "Application sent" successful modal text
+	// Confirma que a tela final de sucesso realmente apareceu.
 	successText := page.Locator("text='Application sent'")
 	if cnt, _ := successText.Count(); cnt == 0 {
-		return fmt.Errorf("Task 49: could not verify application success state")
+		return fmt.Errorf("não foi possível confirmar o estado final de sucesso da candidatura")
 	}
 
 	return nil
 }
 
 func fillTextInputs(page playwright.Page, groqClient *llm.GroqClient) error {
-	// Find all standard input textfields or textareas internally
+	// Localiza campos de texto comuns do formulário.
 	inputs := page.Locator("input[type='text'], textarea, input[type='number'], input[type='tel']")
 	count, err := inputs.Count()
 	if err != nil {
@@ -110,13 +109,13 @@ func fillTextInputs(page playwright.Page, groqClient *llm.GroqClient) error {
 	for i := 0; i < count; i++ {
 		inputLoc := inputs.Nth(i)
 		
-		// If already filled, skip
+		// Ignora campos que já vieram preenchidos pela página.
 		val, _ := inputLoc.InputValue()
 		if val != "" {
 			continue
 		}
 
-		// Identify Label text (Task 43)
+		// Extrai o texto do label associado ao campo.
 		var labelText string
 		id, _ := inputLoc.GetAttribute("id")
 		if id != "" {
@@ -127,17 +126,17 @@ func fillTextInputs(page playwright.Page, groqClient *llm.GroqClient) error {
 		}
 
 		if labelText == "" {
-			// Try implicit label
+			// Tenta obter o label implícito quando não há atributo for.
 			labelLoc := page.Locator("label").Filter(playwright.LocatorFilterOptions{Has: inputLoc})
 			if visible, _ := labelLoc.IsVisible(); visible {
 				labelText, _ = labelLoc.InnerText()
 			}
 		}
 
-		// Task 44: known label OR LLM
+		// Resolve a resposta com regra fixa ou com apoio do LLM.
 		answer := getAnswerForLabel(labelText, groqClient)
 		if answer != "" {
-			// Task 45: TypeHumanly simulator
+			// Digita com atraso humano para reduzir detecção de automação.
 			if err := pw.TypeHumanly(inputLoc, answer); err != nil {
 				log.Printf("TypeHumanly error: %v", err)
 			}
@@ -147,11 +146,11 @@ func fillTextInputs(page playwright.Page, groqClient *llm.GroqClient) error {
 }
 
 func handleFileUpload(page playwright.Page, resumePath string) error {
-	// Task 47
+	// Localiza o campo de upload quando ele estiver visível.
 	fileInput := page.Locator("input[type='file']").First()
 	isVis, _ := fileInput.IsVisible()
 	
-	// Native Playwright handling: The element might be hidden, so we attach directly.
+	// O elemento pode estar oculto; por isso o arquivo é anexado diretamente.
 	count, _ := fileInput.Count()
 	if count > 0 && isVis {
 		err := fileInput.SetInputFiles([]string{resumePath})
@@ -174,7 +173,7 @@ func getAnswerForLabel(label string, groqClient *llm.GroqClient) string {
 		return getEnv("USER_CITY", "São Paulo")
 	}
 	
-	// For complex fields, route to Groq
+	// Para campos complexos, delega a resposta ao Groq.
 	profileContext := getEnv("USER_PROFILE_CONTEXT", "Backend developer experienced in Go, Rust, React. Lives in Brazil.")
 	
 	ans, err := groqClient.AnswerFormField(label, profileContext)
