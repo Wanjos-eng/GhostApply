@@ -21,7 +21,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/ledongthuc/pdf"
 	_ "github.com/mattn/go-sqlite3"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 const defaultIMAPAddress = "imap.gmail.com:993"
@@ -367,18 +367,8 @@ func normalizeDatabasePath(rawPath, appDir string) string {
 }
 
 func openDashboardDatabase(dbPath, dbKey string) (*sql.DB, error) {
-	baseDSN := fmt.Sprintf(
-		"%s?_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)",
-		dbPath,
-	)
-
-	dsnWithKey := baseDSN
-	if strings.TrimSpace(dbKey) != "" {
-		dsnWithKey = fmt.Sprintf(
-			"%s?_pragma=key('%s')&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)",
-			dbPath, dbKey,
-		)
-	}
+	baseDSN := buildDashboardSQLiteDSN(dbPath, "")
+	dsnWithKey := buildDashboardSQLiteDSN(dbPath, dbKey)
 
 	database, err := sql.Open("sqlite3", dsnWithKey)
 	if err == nil {
@@ -410,6 +400,27 @@ func openDashboardDatabase(dbPath, dbKey string) (*sql.DB, error) {
 	}
 
 	return nil, fmt.Errorf("open with key failed: %v; fallback plain failed: %v", err, plainErr)
+}
+
+func buildDashboardSQLiteDSN(dbPath, dbKey string) string {
+	normalizedPath := strings.ReplaceAll(filepath.ToSlash(dbPath), "\\", "/")
+
+	base := fmt.Sprintf(
+		"file:%s?_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)",
+		normalizedPath,
+	)
+
+	trimmedKey := strings.TrimSpace(dbKey)
+	if trimmedKey == "" {
+		return base
+	}
+
+	escapedKey := strings.ReplaceAll(trimmedKey, "'", "''")
+	return fmt.Sprintf(
+		"file:%s?_pragma=key('%s')&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)",
+		normalizedPath,
+		escapedKey,
+	)
 }
 
 // Executa a inicialização quando o app sobe.
@@ -1010,9 +1021,9 @@ func (a *App) SaveSettings(cfg SettingsDTO) bool {
 // Abre o seletor nativo, extrai o texto do PDF e pede ao Gemini o JSON estruturado.
 func (a *App) UploadAndParseCV() ProfileDTO {
 	// 1. Abre o diálogo do sistema operacional.
-	filePath, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+	filePath, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
 		Title: "Select your CV (PDF)",
-		Filters: []runtime.FileFilter{
+		Filters: []wailsruntime.FileFilter{
 			{DisplayName: "PDF Files (*.pdf)", Pattern: "*.pdf"},
 		},
 	})

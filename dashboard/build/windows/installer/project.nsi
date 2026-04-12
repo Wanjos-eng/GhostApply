@@ -34,6 +34,11 @@ Unicode true
 ####
 !include "wails_tools.nsh"
 
+RequestExecutionLevel admin
+SetCompressor /SOLID lzma
+XPStyle on
+WindowIcon on
+
 # The version information for this two must consist of 4 parts
 VIProductVersion "${INFO_PRODUCTVERSION}.0"
 VIFileVersion    "${INFO_PRODUCTVERSION}.0"
@@ -54,21 +59,44 @@ ManifestDPIAware true
 !define MUI_UNICON "..\icon.ico"
 !define MUI_HEADERIMAGE
 !define MUI_HEADERIMAGE_RIGHT
+!define MUI_HEADERIMAGE_BITMAP "resources\header.bmp"
 !define MUI_HEADER_TRANSPARENT_TEXT
-# !define MUI_WELCOMEFINISHPAGE_BITMAP "resources\leftimage.bmp" #Include this to add a bitmap on the left side of the Welcome Page. Must be a size of 164x314
+!define MUI_WELCOMEFINISHPAGE_BITMAP "resources\welcome.bmp"
+!define MUI_UNWELCOMEFINISHPAGE_BITMAP "resources\unwelcome.bmp"
 !define MUI_FINISHPAGE_NOAUTOCLOSE # Wait on the INSTFILES page so the user can take a look into the details of the installation steps
 !define MUI_ABORTWARNING # This will warn the user if they exit from the installer.
 !define MUI_LICENSEPAGE_CHECKBOX
 !define MUI_FINISHPAGE_LINK "Privacy Policy & Terms"
 !define MUI_FINISHPAGE_LINK_LOCATION "https://github.com/Wanjos-eng/GhostApply"
+!define MUI_WELCOMEPAGE_TITLE "Instalador GhostApply"
+!define MUI_WELCOMEPAGE_TEXT "Bem-vindo ao instalador oficial do GhostApply.\r\n\r\nEsta instalacao prepara aplicativo, automacao e base local no padrao da plataforma para iniciar sem configuracao manual.\r\n\r\nClique em Avancar para continuar."
+!define MUI_FINISHPAGE_TITLE "GhostApply instalado com sucesso"
+!define MUI_FINISHPAGE_TEXT "A instalacao foi concluida com sucesso. O GhostApply esta pronto para uso."
+!define MUI_COMPONENTSPAGE_TEXT_TOP "Selecione os itens opcionais da instalacao."
+!define MUI_COMPONENTSPAGE_TEXT_COMPLIST "Componentes disponiveis"
+!define MUI_COMPONENTSPAGE_SMALLDESC
+!define MUI_DIRECTORYPAGE_TEXT_TOP "Escolha a pasta de instalacao do GhostApply."
+!define MUI_INSTFILESPAGE_FINISHHEADER_TEXT "Configuracao concluida"
+!define MUI_INSTFILESPAGE_FINISHHEADER_SUBTEXT "Todos os arquivos foram instalados corretamente."
+!define MUI_FINISHPAGE_RUN "$INSTDIR\${PRODUCT_EXECUTABLE}"
+!define MUI_FINISHPAGE_RUN_TEXT "Abrir GhostApply agora"
+!define MUI_FINISHPAGE_SHOWREADME "$INSTDIR\privacy.txt"
+!define MUI_FINISHPAGE_SHOWREADME_TEXT "Visualizar politica de privacidade"
+!define MUI_FINISHPAGE_SHOWREADME_NOTCHECKED
+!define MUI_UNCONFIRMPAGE_TEXT_TOP "Esta acao removera o GhostApply e os arquivos instalados nesta pasta."
+!define MUI_UNFINISHPAGE_TITLE "GhostApply removido"
+!define MUI_UNFINISHPAGE_TEXT "A desinstalacao foi concluida com sucesso."
 
 !insertmacro MUI_PAGE_WELCOME # Welcome to the installer page.
 !insertmacro MUI_PAGE_LICENSE "resources\eula.txt" # Adds a EULA page to the installer
+!insertmacro MUI_PAGE_COMPONENTS # Optional components page.
 !insertmacro MUI_PAGE_DIRECTORY # In which folder install page.
 !insertmacro MUI_PAGE_INSTFILES # Installing page.
 !insertmacro MUI_PAGE_FINISH # Finished installation page.
 
-!insertmacro MUI_UNPAGE_INSTFILES # Uinstalling page
+!insertmacro MUI_UNPAGE_CONFIRM
+!insertmacro MUI_UNPAGE_INSTFILES # Uninstalling page
+!insertmacro MUI_UNPAGE_FINISH
 
 !insertmacro MUI_LANGUAGE "PortugueseBR" # Set the Language of the installer
 
@@ -78,9 +106,10 @@ ManifestDPIAware true
 
 Name "${INFO_PRODUCTNAME}"
 OutFile "..\..\bin\${INFO_PROJECTNAME}-${ARCH}-installer.exe" # Name of the installer's file.
-InstallDir "$LOCALAPPDATA\${INFO_COMPANYNAME}\${INFO_PRODUCTNAME}" # Default installing folder for user-level install.
-ShowInstDetails show # This will always show the installation details.
-BrandingText "GhostApply • Automacao Inteligente de Candidaturas"
+InstallDir "$PROGRAMFILES32\${INFO_PRODUCTNAME}" # Instala preferencialmente em Program Files (x86).
+ShowInstDetails nevershow
+ShowUnInstDetails nevershow
+BrandingText "GhostApply | Instalacao oficial"
 
 !define APP_DATA_DIR "$APPDATA\GhostApply"
 
@@ -88,7 +117,8 @@ Function .onInit
    !insertmacro wails.checkArchitecture
 FunctionEnd
 
-Section
+Section "Nucleo do aplicativo (obrigatorio)" SEC_CORE
+    SectionIn RO
     !insertmacro wails.setShellContext
 
     !insertmacro wails.webview2runtime
@@ -100,7 +130,7 @@ Section
     File "resources\eula.txt"
     File "resources\privacy.txt"
 
-        # Prepara dados locais para instalação "instalar e usar".
+        # Prepara dados mutaveis em AppData (padrao Windows para SQLite/WAL).
         CreateDirectory "${APP_DATA_DIR}"
 
         IfFileExists "${APP_DATA_DIR}\.env" env_exists env_missing
@@ -118,13 +148,21 @@ Section
         SetOutPath $INSTDIR
 
     CreateShortcut "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
-    CreateShortCut "$DESKTOP\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
 
     !insertmacro wails.associateFiles
     !insertmacro wails.associateCustomProtocols
 
     !insertmacro wails.writeUninstaller
 SectionEnd
+
+Section "Atalho na area de trabalho" SEC_DESKTOP
+    CreateShortCut "$DESKTOP\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
+SectionEnd
+
+!insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
+    !insertmacro MUI_DESCRIPTION_TEXT ${SEC_CORE} "Componentes obrigatorios do GhostApply: app, filler, banco local e configuracoes iniciais."
+    !insertmacro MUI_DESCRIPTION_TEXT ${SEC_DESKTOP} "Cria um atalho do GhostApply na area de trabalho."
+!insertmacro MUI_FUNCTION_DESCRIPTION_END
 
 Section "uninstall"
     !insertmacro wails.setShellContext
