@@ -1,9 +1,8 @@
-// Package main — job card extraction logic for the GhostApply scraper.
+// Package main — lógica de extração de cards de vagas do scraper GhostApply.
 //
-// # Intent
-// Navigate to a LinkedIn job search page filtered for 100% remote roles,
-// then extract structured Vaga data from each card using accessibility selectors.
-// Cards are processed concurrently via goroutines to reduce wall-clock time.
+// # Intenção
+// Navega até uma busca do LinkedIn filtrada para remoto e extrai os dados
+// estruturados de cada card usando seletores de acessibilidade.
 package main
 
 import (
@@ -16,11 +15,11 @@ import (
 
 const linkedInJobsBaseURL = "https://www.linkedin.com/jobs/search/"
 
-// NavigateToLinkedInSearch navigates to a LinkedIn job search filtered to 100% remote.
+// NavigateToLinkedInSearch abre uma busca do LinkedIn filtrada para 100% remoto.
 //
-// # Intent (Task 18)
-// f_WT=2 is LinkedIn's query param for "Remote" work type.
-// Hardcoding it prevents accidental scraping of on-site roles.
+// # Intenção (Tarefa 18)
+// f_WT=2 é o parâmetro do LinkedIn para vagas remotas.
+// Fixar esse filtro evita coletar vagas presenciais por acidente.
 func NavigateToLinkedInSearch(page playwright.Page, keywords string) error {
 	params := url.Values{}
 	params.Set("keywords", keywords)
@@ -39,23 +38,20 @@ func NavigateToLinkedInSearch(page playwright.Page, keywords string) error {
 	return nil
 }
 
-// ExtractVagas extracts all visible job cards from the current search results page.
+// ExtractVagas extrai todos os cards visíveis da página atual de resultados.
 //
-// # Concurrency (Task 20)
-// Each card is processed in its own goroutine. A Mutex protects the shared results
-// slice. Errors per-card are soft-logged (not fatal) — partial results are better
-// than aborting the entire run due to one malformed card.
+// # Concorrência (Tarefa 20)
+// Cada card é processado de forma sequencial porque a página do Playwright não
+// é thread-safe. Se uma vaga falhar, o restante continua normalmente.
 func ExtractVagas(page playwright.Page) ([]domain.Vaga, error) {
-	// Task 20: locate all job cards on the page
+	// Localiza todos os cards de vaga na página.
 	cards, err := page.Locator("ul.jobs-search__results-list li").All()
 	if err != nil {
 		return nil, fmt.Errorf("ExtractVagas: failed to locate job cards: %w", err)
 	}
 
-	// Sequential processing: Playwright page is NOT thread-safe.
-	// Concurrent goroutines calling Click()/InnerText() on the same page
-	// cause race conditions. Sequential with HumanSleep between cards also
-	// produces browsing cadence indistinguishable from a real user.
+	// Processamento sequencial: a página do Playwright não é thread-safe.
+	// Chamadas concorrentes de Click()/InnerText() na mesma página causam corrida.
 	var results []domain.Vaga
 	for _, card := range cards {
 		vaga, err := extractSingleCard(page, card)
@@ -68,12 +64,12 @@ func ExtractVagas(page playwright.Page) ([]domain.Vaga, error) {
 	return results, nil
 }
 
-// extractSingleCard extracts a single Vaga from a job card locator.
+// extractSingleCard extrai uma Vaga a partir de um locator de card.
 //
-// Uses accessibility selectors (GetByRole) where possible — more resilient
-// to LinkedIn's frequent class-name obfuscation.
+// Prioriza seletores de acessibilidade quando possível para resistir a
+// mudanças frequentes de classe no LinkedIn.
 func extractSingleCard(page playwright.Page, card playwright.Locator) (domain.Vaga, error) {
-	// Task 21: title via accessibility role — resilient to class churn
+	// Título via role de acessibilidade, mais resiliente a mudanças de classe.
 	tituloEl := card.GetByRole("heading", playwright.LocatorGetByRoleOptions{
 		Level: playwright.Int(3),
 	})
@@ -82,21 +78,21 @@ func extractSingleCard(page playwright.Page, card playwright.Locator) (domain.Va
 		return domain.Vaga{}, fmt.Errorf("extractSingleCard: cannot get titulo: %w", err)
 	}
 
-	// Task 22: company name
+	// Nome da empresa.
 	empresaEl := card.Locator(".base-search-card__subtitle")
 	empresa, err := empresaEl.InnerText()
 	if err != nil {
 		return domain.Vaga{}, fmt.Errorf("extractSingleCard: cannot get empresa: %w", err)
 	}
 
-	// Task 22: direct job URL from the card anchor
+	// URL direta da vaga a partir do link do card.
 	linkEl := card.Locator("a.base-card__full-link")
 	jobURL, err := linkEl.GetAttribute("href")
 	if err != nil || jobURL == "" {
 		return domain.Vaga{}, fmt.Errorf("extractSingleCard: cannot get job URL")
 	}
 
-	// Task 23: click card to load the detail panel, then extract description
+	// Clica no card para carregar o painel de detalhes e extrair a descrição.
 	if err := linkEl.Click(); err != nil {
 		return domain.Vaga{}, fmt.Errorf("extractSingleCard: failed to click card: %w", err)
 	}
@@ -105,10 +101,10 @@ func extractSingleCard(page playwright.Page, card playwright.Locator) (domain.Va
 	descEl := page.Locator(".show-more-less-html__markup")
 	descricao, err := descEl.InnerText()
 	if err != nil {
-		descricao = "" // description is optional; continue without it
+			descricao = "" // a descrição é opcional; seguimos sem ela
 	}
 
-	// Task Outreach: Extrai dados do recrutador se disponível no painel de detalhes
+	// Extrai dados do recrutador se estiver disponível no painel de detalhes.
 	var recrutadorNome, recrutadorPerfil *string
 	hiringTeamEl := page.Locator(".hirer-card__hirer-information").First()
 	if count, _ := hiringTeamEl.Count(); count > 0 {
