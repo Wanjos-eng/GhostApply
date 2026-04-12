@@ -11,6 +11,7 @@
 use anyhow::{bail, Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroize;
 
 /// System prompt rígido (Task 28).
 /// Força a IA a retornar apenas SIM ou NAO — sem explicações, sem ambiguidade.
@@ -107,6 +108,15 @@ impl GroqClient {
             .await
             .context("GroqClient: falha na requisição HTTP")?;
 
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            bail!(
+                "GroqClient: API retornou HTTP {} — {}",
+                status, body
+            );
+        }
+
         let body: GroqResponse = response
             .json()
             .await
@@ -126,6 +136,12 @@ impl GroqClient {
                 other
             ),
         }
+    }
+}
+
+impl Drop for GroqClient {
+    fn drop(&mut self) {
+        self.api_key.zeroize();
     }
 }
 

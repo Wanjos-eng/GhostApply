@@ -10,6 +10,7 @@
 use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroize;
 
 const GEMINI_API_URL: &str =
     "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
@@ -106,15 +107,23 @@ impl GeminiClient {
             }],
         };
 
-        let url = format!("{}?key={}", GEMINI_API_URL, self.api_key);
-
         let response = self
             .client
-            .post(&url)
+            .post(GEMINI_API_URL)
+            .header("x-goog-api-key", &self.api_key)
             .json(&request)
             .send()
             .await
             .context("GeminiClient: falha na requisição HTTP")?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            anyhow::bail!(
+                "GeminiClient: API retornou HTTP {} — {}",
+                status, body
+            );
+        }
 
         let body: GeminiResponse = response
             .json()
@@ -139,5 +148,11 @@ impl GeminiClient {
         }
 
         Ok(text)
+    }
+}
+
+impl Drop for GeminiClient {
+    fn drop(&mut self) {
+        self.api_key.zeroize();
     }
 }
