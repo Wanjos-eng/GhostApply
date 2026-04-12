@@ -1,6 +1,6 @@
 package domain
 
-// CandidaturaForjada represents the generated mock/personalized resume ready for application.
+// CandidaturaForjada representa o currículo gerado e pronto para candidatura.
 type CandidaturaForjada struct {
 	ID            string
 	VagaID        string
@@ -8,7 +8,7 @@ type CandidaturaForjada struct {
 	Status        Status // Typically "FORJADO", "APLICADA", or "ERRO"
 }
 
-// VagaComCandidatura is an aggregate structure used to hold both the Job and its ready Resume.
+// VagaComCandidatura agrupa a vaga e a candidatura correspondente.
 type VagaComCandidatura struct {
 	Vaga        Vaga
 	Candidatura CandidaturaForjada
