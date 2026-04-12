@@ -13,10 +13,14 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroize;
 
-/// System prompt rígido (Task 28).
-/// Força a IA a retornar apenas SIM ou NAO — sem explicações, sem ambiguidade.
+/// System prompt rígido.
+/// Força a IA a retornar apenas SIM, NAO ou ALERTA_MANUAL — sem explicações.
 const SYSTEM_PROMPT: &str =
-    "Analise o texto. A vaga é exclusiva para remoto? Retorne apenas a palavra SIM ou NAO";
+    "Você é um classificador rigoroso. Avalie a vaga de TI. 
+Regra 1: Se for um Programa de Talentos Premium de grandes empresas (Bancos, Bolsas de Valores, Fintechs, BigTechs), retorne APENAS a palavra ALERTA_MANUAL.
+Regra 2: Se não for programa de talentos, mas for exclusiva para 100% Remoto, retorne APENAS a palavra SIM.
+Regra 3: Se não for remota, ou for híbrida/presencial, retorne APENAS a palavra NAO.
+Atenção: Não justifique nem cumprimente. Sua saída será mapeada diretamente num banco de dados. Seja estrito.";
 
 const GROQ_API_URL: &str = "https://api.groq.com/openai/v1/chat/completions";
 
@@ -78,11 +82,9 @@ impl GroqClient {
         })
     }
 
-    /// Classifica se a vaga é exclusivamente remota.
-    ///
-    /// Retorna `true` se a IA responder "SIM", `false` se "NAO".
-    /// Qualquer outra resposta é tratada como erro (a IA não seguiu o prompt).
-    pub async fn classify_remote(&self, descricao: &str) -> Result<bool> {
+    /// Classifica o status da vaga baseado no Modo Sniper.
+    /// Retorna `"SIM"`, `"NAO"`, ou `"ALERTA_MANUAL"`.
+    pub async fn classify_remote(&self, descricao: &str) -> Result<String> {
         let request = GroqRequest {
             model: self.model.clone(),
             messages: vec![
@@ -95,8 +97,8 @@ impl GroqClient {
                     content: descricao.to_string(),
                 },
             ],
-            temperature: 0.0, // determinístico: queremos SIM/NAO, não criatividade
-            max_tokens: 5,    // SIM ou NAO = 1 token; 5 é margem de segurança
+            temperature: 0.1, // temperatura muito baixa para deter alucinações de formatação
+            max_tokens: 10,   // "ALERTA_MANUAL" requer margem de tokens levemente maior
         };
 
         let response = self
@@ -128,14 +130,20 @@ impl GroqClient {
             .map(|c| c.message.content.trim().to_uppercase())
             .unwrap_or_default();
 
-        match answer.as_str() {
-            "SIM" => Ok(true),
-            "NAO" | "NÃO" => Ok(false),
-            other => bail!(
-                "GroqClient: resposta inesperada do modelo: '{}' (esperado SIM ou NAO)",
-                other
-            ),
+        if answer.contains("ALERTA_MANUAL") {
+            return Ok("ALERTA_MANUAL".to_string());
         }
+        if answer.contains("SIM") {
+            return Ok("SIM".to_string());
+        }
+        if answer.contains("NAO") || answer.contains("NÃO") {
+            return Ok("NAO".to_string());
+        }
+
+        bail!(
+            "GroqClient: resposta inesperada do modelo: '{}' (esperado SIM, NAO ou ALERTA_MANUAL)",
+            answer
+        )
     }
 }
 
@@ -169,7 +177,7 @@ mod tests {
 
         let json = serde_json::to_string(&req).expect("serialização deve funcionar");
         assert!(json.contains("system"));
-        assert!(json.contains(SYSTEM_PROMPT));
+        assert!(json.contains("ALERTA_MANUAL")); // Testa sub-string segura contra \n JSON do Prompt Completo
         assert!(json.contains("test-model"));
     }
 }

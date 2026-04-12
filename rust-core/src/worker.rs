@@ -61,13 +61,24 @@ async fn processar_vaga(
     vaga: &VagaPendente,
 ) -> Result<()> {
     // ── Task 29: Triagem Groq ────────────────────────────────────────────────
-    let is_remote = groq
+    let classificacao = groq
         .classify_remote(&vaga.descricao)
         .await
         .with_context(|| format!("triagem Groq falhou para vaga {}", vaga.id))?;
 
-    // ── Task 30: Rejeitar presenciais ────────────────────────────────────────
-    if !is_remote {
+    // ── Modos de Triagem e Alertas ────────────────────────────────────────
+    if classificacao == "ALERTA_MANUAL" {
+        conn.execute(
+            "UPDATE Vaga_Prospectada SET status = 'ALERTA_MANUAL' WHERE id = ?1",
+            rusqlite::params![vaga.id],
+        )
+        .with_context(|| format!("falha ao criar alerta na vaga {}", vaga.id))?;
+
+        println!("worker: vaga {} → ALERTA_MANUAL (Talent Program Detectado)", vaga.id);
+        return Ok(());
+    }
+
+    if classificacao == "NAO" {
         conn.execute(
             "UPDATE Vaga_Prospectada SET status = 'REJEITADO_PRESENCIAL' WHERE id = ?1",
             rusqlite::params![vaga.id],
