@@ -1,4 +1,77 @@
+import { useEffect, useMemo, useState } from 'react';
+import { FetchInterviews, GerarDossieEstudos } from "../../wailsjs/go/main/App";
+
+interface EmailRecrutador {
+  id: string;
+  email: string;
+  nome: string;
+  classificacao: string;
+  corpo: string;
+}
+
 export function DossierReports() {
+  const [interviews, setInterviews] = useState<EmailRecrutador[]>([]);
+  const [selectedId, setSelectedId] = useState('');
+  const [dossierText, setDossierText] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  useEffect(() => {
+    const loadInterviews = async () => {
+      setLoading(true);
+      try {
+        if ((window as any).go) {
+          const items = await FetchInterviews();
+          setInterviews(items || []);
+          if (items && items.length > 0) {
+            setSelectedId(items[0].id);
+          }
+        }
+      } catch (err) {
+        console.error('FetchInterviews failed:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadInterviews();
+  }, []);
+
+  const selectedInterview = useMemo(
+    () => interviews.find((i) => i.id === selectedId),
+    [interviews, selectedId],
+  );
+
+  const handleGenerate = async () => {
+    if (!selectedInterview) {
+      return;
+    }
+
+    setIsGenerating(true);
+    try {
+      const result = await GerarDossieEstudos(selectedInterview.corpo || '');
+      setDossierText(result || 'Falha ao gerar dossiê.');
+    } catch (err) {
+      setDossierText(`Erro ao gerar dossiê: ${String(err)}`);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleExport = () => {
+    if (!dossierText.trim()) {
+      return;
+    }
+
+    const blob = new Blob([dossierText], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `dossier-${selectedId || 'report'}.txt`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-white w-full">
       {/* Contextual Header */}
@@ -8,19 +81,60 @@ export function DossierReports() {
           <span className="material-symbols-outlined text-xs">chevron_right</span>
           <span className="text-[0.6875rem] font-semibold uppercase tracking-widest text-on-surface">Dossier Viewer</span>
         </div>
-        <button className="px-4 py-2 text-[0.875rem] font-medium text-zinc-400 border border-zinc-200 cursor-not-allowed rounded-lg flex items-center gap-2">
+        <button onClick={handleExport} disabled={!dossierText.trim()} className="px-4 py-2 text-[0.875rem] font-medium rounded-lg flex items-center gap-2 border transition disabled:text-zinc-400 disabled:border-zinc-200 disabled:cursor-not-allowed text-zinc-800 border-zinc-300 hover:bg-zinc-50">
           <span className="material-symbols-outlined text-sm">picture_as_pdf</span>
-          Export to PDF
+          Exportar Dossiê (.txt)
         </button>
       </div>
 
-      {/* Document Viewport - Empty State */}
-      <div className="flex-1 overflow-y-auto no-scrollbar flex items-center justify-center">
-        <div className="text-center space-y-4 max-w-md">
-           <span className="material-symbols-outlined text-zinc-200 text-6xl">search_insights</span>
-           <h2 className="text-xl font-headline font-bold text-zinc-900">Nenhum Dossiê Selecionado</h2>
-           <p className="text-zinc-500 text-sm">Os dossiês estratégicos gerados pelo LLM a partir dos convites de entrevista aparecerão aqui após iniciados pelo Dashboard Kanban.</p>
-        </div>
+      <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[360px_1fr]">
+        <aside className="border-r border-zinc-100 p-6 overflow-y-auto no-scrollbar">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xs font-bold tracking-widest uppercase text-zinc-500">Convites de Entrevista</h2>
+            <span className="text-xs font-mono text-zinc-400">{interviews.length}</span>
+          </div>
+
+          <div className="space-y-3">
+            {loading && (
+              <div className="p-4 text-sm text-zinc-500 border border-zinc-200 rounded-lg">Carregando entrevistas...</div>
+            )}
+
+            {!loading && interviews.map((item) => (
+              <button key={item.id} onClick={() => setSelectedId(item.id)} className={`w-full text-left p-4 rounded-lg border transition ${selectedId === item.id ? 'border-blue-400 bg-blue-50/50' : 'border-zinc-200 hover:border-zinc-300'}`}>
+                <p className="text-sm font-semibold text-zinc-900 truncate">{item.nome || item.email}</p>
+                <p className="text-xs text-zinc-500 truncate mt-1">{item.email}</p>
+              </button>
+            ))}
+
+            {!loading && interviews.length === 0 && (
+              <div className="p-4 text-sm text-zinc-500 border border-zinc-200 rounded-lg">Nenhum convite de entrevista encontrado no banco.</div>
+            )}
+          </div>
+        </aside>
+
+        <section className="p-8 overflow-y-auto no-scrollbar flex flex-col gap-6">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h3 className="text-lg font-semibold text-zinc-900">Dossiê Estratégico</h3>
+              <p className="text-sm text-zinc-500">Selecione uma entrevista e gere um plano com Gemini.</p>
+            </div>
+            <button onClick={handleGenerate} disabled={!selectedInterview || isGenerating} className="px-4 py-2 text-sm font-semibold rounded-lg bg-zinc-900 text-white hover:bg-zinc-800 disabled:bg-zinc-300 disabled:cursor-not-allowed">
+              {isGenerating ? 'Gerando...' : 'Gerar Dossiê'}
+            </button>
+          </div>
+
+          {selectedInterview && (
+            <div className="p-4 border border-zinc-200 rounded-lg bg-zinc-50">
+              <p className="text-sm font-semibold text-zinc-900">{selectedInterview.nome || selectedInterview.email}</p>
+              <p className="text-xs text-zinc-500 mt-1">{selectedInterview.email}</p>
+              <p className="text-sm text-zinc-700 mt-3 whitespace-pre-wrap">{selectedInterview.corpo || 'Sem corpo de email disponível.'}</p>
+            </div>
+          )}
+
+          <div className="min-h-[320px] p-5 border border-zinc-200 rounded-lg bg-white text-sm text-zinc-700 whitespace-pre-wrap">
+            {dossierText || 'Clique em Gerar Dossiê para processar o email selecionado.'}
+          </div>
+        </section>
       </div>
     </div>
   );
