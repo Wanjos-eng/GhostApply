@@ -4,7 +4,7 @@
 //! Abrir uma conexão SQLite **e** ativar a criptografia AES-256 de forma atômica,
 //! garantindo que nenhuma operação ocorra antes do `PRAGMA key`.
 //!
-//! # Restrição (SecOps — Tarefa 06)
+//! # Restrição (SecOps)
 //! O `PRAGMA key` deve ser a **primeira** instrução executada após `open`.
 //! Qualquer operação antes dele receberá os dados como texto puro — falha de segurança crítica.
 
