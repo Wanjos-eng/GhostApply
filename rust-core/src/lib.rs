@@ -2,15 +2,25 @@
 //!
 //! # Arquitetura (Clean Arch)
 //! ```text
-//! lib.rs         ← ponto de entrada público (entidades + use-cases básicos)
-//! config.rs      ← carregamento seguro do .env (AppConfig + Zeroize)
+//! lib.rs            ← ponto de entrada público (entidades + use-cases básicos)
+//! config.rs         ← carregamento seguro do .env (AppConfig + Zeroize)
 //! database/
-//!   connection.rs ← fábrica de conexão SQLCipher AES-256
-//!   migrations.rs ← DDL idempotente (3 tabelas)
+//!   connection.rs   ← fábrica de conexão SQLCipher AES-256
+//!   migrations.rs   ← DDL idempotente (3 tabelas)
+//! llm/
+//!   groq_client.rs  ← triagem remoto/presencial (TLS 1.3)
+//!   gemini_client.rs← geração de currículo adaptado
+//! pdf/
+//!   generator.rs    ← MD → PDF com CSS corporativo
+//! worker.rs         ← orquestrador do pipeline multi-agente
 //! ```
 
 pub mod config;
 pub mod database;
+pub mod llm;
+pub mod pdf;
+pub mod worker;
+
 
 use anyhow::{bail, Context, Result};
 use rusqlite::Connection;
