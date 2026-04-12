@@ -6,6 +6,7 @@ import { BaseProfile } from "./components/BaseProfile";
 import { DossierReports } from "./components/DossierReports";
 import { HistoryView } from "./components/HistoryView";
 import { Settings } from "./components/Settings";
+import { ProspectedJobsView } from "./components/ProspectedJobsView";
 
 function App() {
   const [activeScreen, setActiveScreen] = useState('dashboard');
@@ -17,6 +18,7 @@ function App() {
         <TopAppBar />
         {activeScreen === 'dashboard' && <DashboardView />}
         {activeScreen === 'history' && <HistoryView />}
+        {activeScreen === 'prospected' && <ProspectedJobsView />}
         {activeScreen === 'profile' && <BaseProfile />}
         {activeScreen === 'reports' && <DossierReports />}
         {activeScreen === 'settings' && <Settings />}
