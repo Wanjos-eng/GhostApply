@@ -11,7 +11,9 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -188,6 +190,69 @@ func mergeSettingsEnv(existing map[string]string, cfg SettingsDTO) map[string]st
 	return envMap
 }
 
+func envOrDefault(key, fallback string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func envIntOrDefault(key string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(raw)
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
+}
+
+func ensurePrivateFile(path string) {
+	if strings.TrimSpace(path) == "" {
+		return
+	}
+	if _, err := os.Stat(path); err != nil {
+		return
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		log.Printf("privacy: aviso ao aplicar permissão 600 em %s: %v", path, err)
+	}
+}
+
+func runRetentionPolicies(database *sql.DB, now time.Time, retentionDays int, maxEmails int) error {
+	if database == nil {
+		return nil
+	}
+	if retentionDays <= 0 {
+		retentionDays = 90
+	}
+
+	threshold := now.UTC().AddDate(0, 0, -retentionDays).Format(time.RFC3339)
+
+	if _, err := database.Exec("DELETE FROM Candidatura_Forjada WHERE criado_em < ?", threshold); err != nil {
+		return fmt.Errorf("retention candidatura: %w", err)
+	}
+	if _, err := database.Exec("DELETE FROM Vaga_Prospectada WHERE criado_em < ?", threshold); err != nil {
+		return fmt.Errorf("retention vaga: %w", err)
+	}
+
+	if maxEmails > 0 {
+		if _, err := database.Exec(
+			`DELETE FROM Email_Recrutador
+			 WHERE id NOT IN (
+			   SELECT id FROM Email_Recrutador ORDER BY rowid DESC LIMIT ?
+			 )`,
+			maxEmails,
+		); err != nil {
+			return fmt.Errorf("retention email: %w", err)
+		}
+	}
+
+	return nil
+}
+
 // Estrutura principal da aplicação Wails.
 type App struct {
 	ctx      context.Context
@@ -209,6 +274,12 @@ func (a *App) startup(ctx context.Context) {
 
 	if dbPath == "" {
 		dbPath = "../forja_ghost.sqlite"
+	}
+
+	ensurePrivateFile("../.env")
+	ensurePrivateFile(envOrDefault("SESSION_PATH", filepath.Join("..", "session.json")))
+	if dbPath != ":memory:" {
+		ensurePrivateFile(dbPath)
 	}
 
 	dsn := fmt.Sprintf(
@@ -267,6 +338,12 @@ func (a *App) startup(ctx context.Context) {
 			log.Printf("WAILS: falha ao inicializar schema do banco: %v\n", initErr)
 		}
 		a.database = database
+
+		retentionDays := envIntOrDefault("DATA_RETENTION_DAYS", 90)
+		maxEmails := envIntOrDefault("EMAIL_RETENTION_MAX", 2000)
+		if retentionErr := runRetentionPolicies(a.database, time.Now(), retentionDays, maxEmails); retentionErr != nil {
+			log.Printf("privacy: falha na retenção automática: %v", retentionErr)
+		}
 	}
 
 	// Dispara a sincronização de emails em background para não travar a abertura.
@@ -844,8 +921,7 @@ CV Text:
 	if len(result.Candidates) > 0 && len(result.Candidates[0].Content.Parts) > 0 {
 		geminiJSON := result.Candidates[0].Content.Parts[0].Text
 		geminiJSON = string(bytes.TrimSpace([]byte(geminiJSON)))
-
-		log.Println("Gemini Extracted JSON:", geminiJSON)
+		log.Printf("UploadAndParseCV: Gemini JSON recebido (%d bytes)", len(geminiJSON))
 		var parsed ProfileDTO
 		// Preenche os valores padrão.
 		parsed.StrictlyRemote = true
@@ -885,10 +961,10 @@ func (a *App) StartDaemon(cfg ProfileDTO) bool {
 
 		// Executa de forma síncrona dentro da goroutine.
 		if err := cmd.Run(); err != nil {
-			log.Printf("❌ Filler exited with error: %v\nStdout: %s\nStderr: %s",
-				err, stdout.String(), stderr.String())
+			log.Printf("❌ Filler exited with error: %v (stdout_bytes=%d stderr_bytes=%d)",
+				err, stdout.Len(), stderr.Len())
 		} else {
-			log.Printf("✅ Filler completed successfully\nOutput: %s", stdout.String())
+			log.Printf("✅ Filler completed successfully (stdout_bytes=%d)", stdout.Len())
 		}
 	}()
 
