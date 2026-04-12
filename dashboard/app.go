@@ -302,8 +302,8 @@ func (a *App) startup(ctx context.Context) {
 	}
 
 	dsn := fmt.Sprintf(
-		`%s?_pragma=key('%s')&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)`,
-		dbPath, dbKey,
+		"file:%s?_pragma=key('%s')&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)",
+		filepath.ToSlash(dbPath), dbKey,
 	)
 
 	database, err := sql.Open("sqlite3", dsn)

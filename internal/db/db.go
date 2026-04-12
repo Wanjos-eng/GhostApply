@@ -12,6 +12,7 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"path/filepath"
 
 	// Driver CGO: exige CGO_ENABLED=1 e libsqlcipher-dev no ambiente de build.
 	// O import em branco registra o driver "sqlite3" no database/sql.
@@ -25,11 +26,11 @@ import (
 //
 // `path` pode ser `:memory:` em testes; SQLCipher aceita chave vazia nesse caso.
 func Open(path, key string) (*sql.DB, error) {
-	// `_pragma=key` codifica a senha do SQLCipher diretamente no DSN.
-	// O driver aplica isso antes de qualquer leitura ou escrita.
+	// O driver sqlite3 requer prefixo 'file:' e barras '/' (ToSlash) para processar os pragmas 
+	// sem tratar o '?' como um caractere inválido no nome do arquivo do Windows C:\
 	dsn := fmt.Sprintf(
-		"%s?_pragma=key('%s')&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)",
-		path, key,
+		"file:%s?_pragma=key('%s')&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)",
+		filepath.ToSlash(path), key,
 	)
 
 	db, err := sql.Open("sqlite3", dsn)
