@@ -64,7 +64,7 @@ func run() error {
 
 	ctx, err := browser.NewContext()
 	if err != nil {
-		return fmt.Errorf("run: failed to create browser context: %w", err)
+		return fmt.Errorf("run: falha ao criar contexto do navegador: %w", err)
 	}
 	defer ctx.Close()
 
