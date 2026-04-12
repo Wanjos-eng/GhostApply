@@ -82,6 +82,8 @@ InstallDir "$LOCALAPPDATA\${INFO_COMPANYNAME}\${INFO_PRODUCTNAME}" # Default ins
 ShowInstDetails show # This will always show the installation details.
 BrandingText "GhostApply • Automacao Inteligente de Candidaturas"
 
+!define APP_DATA_DIR "$APPDATA\GhostApply"
+
 Function .onInit
    !insertmacro wails.checkArchitecture
 FunctionEnd
@@ -94,9 +96,26 @@ Section
     SetOutPath $INSTDIR
 
     !insertmacro wails.files
-    File /nonfatal "..\..\bin\filler.exe"
+        File "..\..\bin\filler.exe"
     File "resources\eula.txt"
     File "resources\privacy.txt"
+
+        # Prepara dados locais para instalação "instalar e usar".
+        CreateDirectory "${APP_DATA_DIR}"
+
+        IfFileExists "${APP_DATA_DIR}\.env" env_exists env_missing
+        env_missing:
+            SetOutPath "${APP_DATA_DIR}"
+            File /oname=.env "resources\app.env"
+        env_exists:
+
+        IfFileExists "${APP_DATA_DIR}\forja_ghost.sqlite" db_exists db_missing
+        db_missing:
+            SetOutPath "${APP_DATA_DIR}"
+            File /oname=forja_ghost.sqlite "resources\forja_ghost.sqlite"
+        db_exists:
+
+        SetOutPath $INSTDIR
 
     CreateShortcut "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
     CreateShortCut "$DESKTOP\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
