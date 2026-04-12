@@ -25,6 +25,19 @@ type EmailRecrutador struct {
 	Corpo         string `json:"corpo"`
 }
 
+type VagaHistoricoDTO struct {
+	VagaID            string `json:"vaga_id"`
+	Titulo            string `json:"titulo"`
+	Empresa           string `json:"empresa"`
+	URL               string `json:"url"`
+	VagaStatus        string `json:"vaga_status"`
+	CandidaturaID     string `json:"candidatura_id"`
+	CandidaturaStatus string `json:"candidatura_status"`
+	RecrutadorNome    string `json:"recrutador_nome"`
+	RecrutadorPerfil  string `json:"recrutador_perfil"`
+	CriadoEm          string `json:"criado_em"`
+}
+
 // App struct
 type App struct {
 	ctx      context.Context
@@ -113,6 +126,47 @@ func (a *App) FetchInterviews() []EmailRecrutador {
 		}
 	}
 	return ints
+}
+
+// FetchHistory returns deeply nested applications + prospects across AI state lifecycle.
+func (a *App) FetchHistory() []VagaHistoricoDTO {
+	if a.database == nil {
+		return nil
+	}
+
+	query := `
+		SELECT 
+			v.id, v.titulo, v.empresa, v.url, v.status,
+			COALESCE(v.recrutador_nome, ''), COALESCE(v.recrutador_perfil, ''),
+			v.criado_em,
+			COALESCE(c.id, ''), COALESCE(c.status, '')
+		FROM Vaga_Prospectada v
+		LEFT JOIN Candidatura_Forjada c ON v.id = c.vaga_id
+		ORDER BY v.criado_em DESC
+		LIMIT 1000
+	`
+
+	rows, err := a.database.Query(query)
+	if err != nil {
+		log.Printf("FetchHistory: query failed: %v", err)
+		return nil
+	}
+	defer rows.Close()
+
+	var results []VagaHistoricoDTO
+	for rows.Next() {
+		var h VagaHistoricoDTO
+		if err := rows.Scan(
+			&h.VagaID, &h.Titulo, &h.Empresa, &h.URL, &h.VagaStatus,
+			&h.RecrutadorNome, &h.RecrutadorPerfil, &h.CriadoEm,
+			&h.CandidaturaID, &h.CandidaturaStatus,
+		); err == nil {
+			results = append(results, h)
+		} else {
+			log.Printf("FetchHistory scan err: %v", err)
+		}
+	}
+	return results
 }
 
 // SyncEmailsRoutine hooks into imap_listener.go and cohere.go 
