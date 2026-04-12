@@ -266,17 +266,108 @@ func NewApp() *App {
 
 // GetAppDir returns the persistent configuration directory (~/.ghostapply)
 func GetAppDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		home = "." // fallback
+	baseDir, err := os.UserConfigDir()
+	if err != nil || strings.TrimSpace(baseDir) == "" {
+		home, homeErr := os.UserHomeDir()
+		if homeErr != nil || strings.TrimSpace(home) == "" {
+			baseDir = "."
+		} else {
+			baseDir = home
+		}
 	}
-	appDir := filepath.Join(home, ".ghostapply")
-	os.MkdirAll(appDir, 0o700)
+	appDir := filepath.Join(baseDir, "GhostApply")
+	_ = os.MkdirAll(appDir, 0o700)
 	return appDir
 }
 
 func getAppEnvPath() string {
 	return filepath.Join(GetAppDir(), ".env")
+}
+
+func resolveFillerCommand() (*exec.Cmd, error) {
+	exePath, err := os.Executable()
+	if err == nil {
+		exeDir := filepath.Dir(exePath)
+		candidates := []string{
+			filepath.Join(exeDir, "filler.exe"),
+			filepath.Join(exeDir, "filler"),
+		}
+		for _, candidate := range candidates {
+			if info, statErr := os.Stat(candidate); statErr == nil && !info.IsDir() {
+				cmd := exec.Command(candidate)
+				cmd.Dir = exeDir
+				return cmd, nil
+			}
+		}
+	}
+
+	if _, lookErr := exec.LookPath("go"); lookErr == nil {
+		cmd := exec.Command("go", "run", "./cmd/filler")
+		cmd.Dir = ".."
+		return cmd, nil
+	}
+
+	return nil, fmt.Errorf("filler binary not found and 'go' is unavailable")
+}
+
+func normalizeDatabasePath(rawPath, appDir string) string {
+	trimmed := strings.TrimSpace(rawPath)
+	if trimmed == "" {
+		return filepath.Join(appDir, "forja_ghost.sqlite")
+	}
+	if trimmed == ":memory:" {
+		return trimmed
+	}
+	if filepath.IsAbs(trimmed) {
+		return trimmed
+	}
+	return filepath.Join(appDir, trimmed)
+}
+
+func openDashboardDatabase(dbPath, dbKey string) (*sql.DB, error) {
+	baseDSN := fmt.Sprintf(
+		"file:%s?_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)",
+		filepath.ToSlash(dbPath),
+	)
+
+	dsnWithKey := baseDSN
+	if strings.TrimSpace(dbKey) != "" {
+		dsnWithKey = fmt.Sprintf(
+			"file:%s?_pragma=key('%s')&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)",
+			filepath.ToSlash(dbPath), dbKey,
+		)
+	}
+
+	database, err := sql.Open("sqlite3", dsnWithKey)
+	if err == nil {
+		err = database.Ping()
+	}
+	if err == nil {
+		return database, nil
+	}
+
+	if database != nil {
+		_ = database.Close()
+	}
+
+	if strings.TrimSpace(dbKey) == "" {
+		return nil, err
+	}
+
+	// Fallback para ambientes onde o binário foi compilado sem SQLCipher.
+	plainDB, plainErr := sql.Open("sqlite3", baseDSN)
+	if plainErr == nil {
+		plainErr = plainDB.Ping()
+	}
+	if plainErr == nil {
+		log.Printf("WAILS: aviso — fallback para SQLite sem key pragma em %s", dbPath)
+		return plainDB, nil
+	}
+	if plainDB != nil {
+		_ = plainDB.Close()
+	}
+
+	return nil, fmt.Errorf("open with key failed: %v; fallback plain failed: %v", err, plainErr)
 }
 
 // Executa a inicialização quando o app sobe.
@@ -291,12 +382,8 @@ func (a *App) startup(ctx context.Context) {
 		_ = godotenv.Load("../.env")
 	}
 
-	dbPath := os.Getenv("DATABASE_URL")
+	dbPath := normalizeDatabasePath(os.Getenv("DATABASE_URL"), appDir)
 	dbKey := os.Getenv("DB_ENCRYPTION_KEY")
-
-	if dbPath == "" {
-		dbPath = filepath.Join(appDir, "forja_ghost.sqlite")
-	}
 
 	ensurePrivateFile(appEnvPath)
 	ensurePrivateFile(envOrDefault("SESSION_PATH", filepath.Join(appDir, "session.json")))
@@ -307,15 +394,7 @@ func (a *App) startup(ctx context.Context) {
 		ensurePrivateFile(dbPath)
 	}
 
-	dsn := fmt.Sprintf(
-		"file:%s?_pragma=key('%s')&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)",
-		filepath.ToSlash(dbPath), dbKey,
-	)
-
-	database, err := sql.Open("sqlite3", dsn)
-	if err == nil {
-		err = database.Ping()
-	}
+	database, err := openDashboardDatabase(dbPath, dbKey)
 
 	if err != nil {
 		log.Printf("WAILS: falha ao abrir conexão com banco: %v\n", err)
@@ -978,11 +1057,11 @@ func (a *App) StartDaemon(cfg ProfileDTO) bool {
 
 	// Sobe o filler como subprocesso em background sem travar a UI.
 	go func() {
-		// Usa go run a partir da raiz do repositório durante o desenvolvimento.
-		cmd := exec.Command("go", "run", "./cmd/filler")
-
-		// Executa a partir da raiz do projeto para o filler resolver os caminhos.
-		cmd.Dir = ".."
+		cmd, err := resolveFillerCommand()
+		if err != nil {
+			log.Printf("❌ Filler launch failed: %v", err)
+			return
+		}
 
 		// Herda o ambiente atual; o filler lê o .env na inicialização.
 		cmd.Env = os.Environ()
