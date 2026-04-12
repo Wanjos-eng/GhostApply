@@ -1,14 +1,14 @@
-// Command scraper is the GhostApply stealth scraper.
+// Command scraper é o coletor principal do GhostApply.
 //
 // Pipeline:
-//  1. Load config from .env
-//  2. Open AES-256 encrypted database
-//  3. Launch Playwright (headless + anti-bot)
-//  4. Inject session cookies from session.json
-//  5. Navigate to LinkedIn remote job search
-//  6. Extract job cards concurrently
-//  7. Sanitise descriptions (SecOps: prompt injection prevention)
-//  8. Persist to encrypted database with status PENDENTE
+//  1. Carrega configuração do .env
+//  2. Abre o banco SQLite criptografado
+//  3. Sobe o Playwright com endurecimento contra bot
+//  4. Injeta cookies da sessão salva
+//  5. Navega até a busca de vagas remotas
+//  6. Extrai os cards de vaga
+//  7. Sanitiza descrições para reduzir risco de prompt injection
+//  8. Persiste no banco com status PENDENTE
 package main
 
 import (
@@ -32,9 +32,9 @@ func main() {
 }
 
 func run() error {
-	// ── Step 1: Load environment config ──────────────────────────────────────
+	// ── Etapa 1: carrega a configuração do ambiente ─────────────────────────
 	if err := godotenv.Load(); err != nil {
-		log.Println("scraper: no .env file found, using system environment")
+		log.Println("scraper: nenhum .env encontrado, usando o ambiente do sistema")
 	}
 
 	dbPath := mustEnv("DATABASE_URL")
@@ -42,14 +42,14 @@ func run() error {
 	sessionPath := getEnv("SESSION_PATH", "session.json")
 	keywords    := getEnv("SEARCH_KEYWORDS", "golang engineer")
 
-	// ── Step 2: Open encrypted database ──────────────────────────────────────
+	// ── Etapa 2: abre o banco criptografado ─────────────────────────────────
 	database, err := db.Open(dbPath, dbKey)
 	if err != nil {
 		return fmt.Errorf("run: %w", err)
 	}
 	defer database.Close()
 
-	// ── Step 3 & 4: Playwright setup ──────────────────────────────────────────
+	// ── Etapas 3 e 4: configura o Playwright ─────────────────────────────────
 	pw, err := playwright.Run()
 	if err != nil {
 		return fmt.Errorf("run: failed to start Playwright: %w", err)
@@ -68,7 +68,7 @@ func run() error {
 	}
 	defer ctx.Close()
 
-	// Task 17: inject session cookies before any navigation
+	// Injeta os cookies da sessão antes de qualquer navegação.
 	if err := LoadCookies(ctx, sessionPath); err != nil {
 		log.Printf("scraper: warning — could not load cookies from %s: %v", sessionPath, err)
 		log.Println("scraper: continuing without session (expect login wall)")
@@ -80,47 +80,47 @@ func run() error {
 	}
 	defer page.Close()
 
-	// ── Step 5: Navigate to LinkedIn remote search ────────────────────────────
+	// ── Etapa 5: navega até a busca remota do LinkedIn ──────────────────────
 	if err := NavigateToLinkedInSearch(page, keywords); err != nil {
 		return fmt.Errorf("run: %w", err)
 	}
 
-	// ── Step 6: Extract job cards concurrently ────────────────────────────────
+	// ── Etapa 6: extrai os cards de vaga ─────────────────────────────────────
 	vagas, err := ExtractVagas(page)
 	if err != nil {
 		return fmt.Errorf("run: %w", err)
 	}
 	log.Printf("scraper: extracted %d job cards", len(vagas))
 
-	// ── Steps 7 & 8: Sanitise + persist ──────────────────────────────────────
+	// ── Etapas 7 e 8: sanitiza e persiste ───────────────────────────────────
 	saved := 0
 	for i := range vagas {
 		vagas[i].ID = uuid.NewString()
 
-		// Task 24 (SecOps): strip scripts, emails, URLs from raw description
+		// Remove scripts, emails e URLs da descrição bruta.
 		if vagas[i].Descricao != "" {
 			clean, err := parser.Clean(vagas[i].Descricao)
 			if err != nil {
-				log.Printf("scraper: skipping vaga %s — empty description after clean", vagas[i].ID)
+				log.Printf("scraper: ignorando vaga %s — descrição vazia após limpeza", vagas[i].ID)
 				continue
 			}
 			vagas[i].Descricao = clean
 		}
 
-		// Task 25: persist with status PENDENTE
+		// Persiste com status PENDENTE.
 		if err := insertVaga(database, vagas[i]); err != nil {
-			log.Printf("scraper: failed to save vaga %s: %v", vagas[i].ID, err)
+			log.Printf("scraper: falha ao salvar vaga %s: %v", vagas[i].ID, err)
 			continue
 		}
 		saved++
 	}
 
-	log.Printf("scraper: saved %d/%d vagas to database", saved, len(vagas))
+	log.Printf("scraper: salvou %d/%d vagas no banco", saved, len(vagas))
 	return nil
 }
 
-// insertVaga persists a Vaga using INSERT OR IGNORE (idempotent on URL).
-// Task 25: status is set to PENDENTE for downstream AI processing.
+// insertVaga persiste uma Vaga usando INSERT OR IGNORE, mantendo idempotência por URL.
+// O status inicial fica como PENDENTE para o processamento seguinte.
 func insertVaga(database *sql.DB, v domain.Vaga) error {
 	_, err := database.Exec(
 		`INSERT OR IGNORE INTO Vaga_Prospectada (id, titulo, empresa, url, descricao, status, recrutador_nome, recrutador_perfil)
@@ -133,7 +133,7 @@ func insertVaga(database *sql.DB, v domain.Vaga) error {
 	return nil
 }
 
-// mustEnv returns the value of an environment variable or exits with a clear message.
+// mustEnv retorna uma variável de ambiente ou encerra com mensagem clara.
 func mustEnv(key string) string {
 	v := os.Getenv(key)
 	if v == "" {
@@ -142,7 +142,7 @@ func mustEnv(key string) string {
 	return v
 }
 
-// getEnv returns the value of an environment variable or a default.
+// getEnv retorna uma variável de ambiente ou um valor padrão.
 func getEnv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
