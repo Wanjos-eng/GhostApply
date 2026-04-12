@@ -1,10 +1,10 @@
 //! Gerador de PDF a partir de Markdown — pipeline MD → HTML → PDF.
 //!
-//! # Intent (Tasks 33–37)
+//! # Intenção (Tarefas 33–37)
 //! Recebe a saída bruta do Gemini, extrai apenas o bloco Markdown útil,
 //! aplica CSS corporativo e gera um PDF em `/tmp/forja/{uuid}-cv.pdf`.
 //!
-//! # Constraint (SecOps — Task 37)
+//! # Restrição (SecOps — Tarefa 37)
 //! PDFs são salvos em diretório isolado com nome UUID dinâmico para evitar
 //! colisões e impedir acesso previsível (path traversal).
 
@@ -14,7 +14,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
-/// CSS corporativo básico embutido (Task 35).
+/// CSS corporativo básico embutido.
 /// Fontes sans-serif, cores escuras, espaçamento profissional.
 #[allow(dead_code)]
 pub const CSS_TEMPLATE: &str = r#"
@@ -33,7 +33,7 @@ li { margin-bottom: 4px; }
 p { margin: 6px 0; }
 "#;
 
-/// Extrai apenas o bloco Markdown útil da resposta do LLM (Task 33).
+/// Extrai apenas o bloco Markdown útil da resposta do LLM.
 ///
 /// Remove saudações, comentários e artefatos que a IA pode gerar
 /// apesar do prompt rígido. Se houver um bloco ```markdown```, extrai o conteúdo
@@ -85,10 +85,10 @@ fn markdown_to_html(md: &str) -> String {
 
 /// Gera o PDF a partir de Markdown e salva em `/tmp/forja/{uuid}-cv.pdf`.
 ///
-/// # SecOps (Task 37)
+/// # SecOps
 /// - Diretório `/tmp/forja/` é criado automaticamente se não existir
 /// - Nome usa UUID v4 → imprevisível, sem colisões
-/// - Retorna o `PathBuf` exato para registro no banco (Task 38)
+/// - Retorna o `PathBuf` exato para registro no banco.
 pub fn render_to_pdf(markdown: &str, output_dir: &Path) -> Result<PathBuf> {
     // Garante que o diretório de saída existe
     fs::create_dir_all(output_dir)
