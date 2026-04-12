@@ -271,21 +271,24 @@ func GetAppDir() string {
 		home = "." // fallback
 	}
 	appDir := filepath.Join(home, ".ghostapply")
-	os.MkdirAll(appDir, 0o755)
+	os.MkdirAll(appDir, 0o700)
 	return appDir
+}
+
+func getAppEnvPath() string {
+	return filepath.Join(GetAppDir(), ".env")
 }
 
 // Executa a inicialização quando o app sobe.
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	appDir := GetAppDir()
+	appEnvPath := filepath.Join(appDir, ".env")
 
-	// 1. Tenta carregar o .env do desenvolvimento (pwd), se falhar usa o do usuário
-	if err := godotenv.Load("../.env"); err != nil {
-		godotenv.Load(filepath.Join(appDir, ".env")) // Se não tiver não falha catastroficamente
-	} else {
-		// Estamos num ambiente que achou o ../.env. Tentar copiar o .env pra pasta oficial caso nova
-		ensurePrivateFile(filepath.Join(appDir, ".env"))
+	// 1. Carrega configuração da pasta persistente do usuário.
+	if err := godotenv.Load(appEnvPath); err != nil {
+		// Compatibilidade com execução de desenvolvimento pela raiz do projeto.
+		_ = godotenv.Load("../.env")
 	}
 
 	dbPath := os.Getenv("DATABASE_URL")
@@ -295,9 +298,12 @@ func (a *App) startup(ctx context.Context) {
 		dbPath = filepath.Join(appDir, "forja_ghost.sqlite")
 	}
 
-	ensurePrivateFile(filepath.Join(appDir, ".env"))
+	ensurePrivateFile(appEnvPath)
 	ensurePrivateFile(envOrDefault("SESSION_PATH", filepath.Join(appDir, "session.json")))
 	if dbPath != ":memory:" {
+		if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
+			log.Printf("privacy: aviso ao garantir diretório do banco: %v", err)
+		}
 		ensurePrivateFile(dbPath)
 	}
 
@@ -314,7 +320,7 @@ func (a *App) startup(ctx context.Context) {
 	if err != nil {
 		log.Printf("WAILS: falha ao abrir conexão com banco: %v\n", err)
 	} else {
-		// O driver sqlite3 (go-sqlite3) e o SQLCipher podem falhar em multi-statements no CREATE. 
+		// O driver sqlite3 (go-sqlite3) e o SQLCipher podem falhar em multi-statements no CREATE.
 		// Separamos para garantir a montagem tática inicial.
 		schemas := []string{
 			`CREATE TABLE IF NOT EXISTS Vaga_Prospectada (
@@ -823,7 +829,7 @@ type ProfileDTO struct {
 
 // Carrega o mapeamento local do .env para a tela de configurações do frontend.
 func (a *App) LoadSettings() SettingsDTO {
-	godotenv.Load("../.env")
+	_ = godotenv.Load(getAppEnvPath())
 	return SettingsDTO{
 		// Não devolve segredos para o frontend por padrão.
 		CohereAPIKey: "",
@@ -837,7 +843,8 @@ func (a *App) LoadSettings() SettingsDTO {
 
 // Persiste os valores do mapa de volta no .env local de forma segura.
 func (a *App) SaveSettings(cfg SettingsDTO) bool {
-	existing, err := godotenv.Read("../.env")
+	envPath := getAppEnvPath()
+	existing, err := godotenv.Read(envPath)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		log.Printf("SaveSettings: falha ao ler .env atual: %v", err)
 		return false
@@ -846,13 +853,13 @@ func (a *App) SaveSettings(cfg SettingsDTO) bool {
 	envMap := mergeSettingsEnv(existing, cfg)
 
 	// Persiste no .env local.
-	err = godotenv.Write(envMap, "../.env")
+	err = godotenv.Write(envMap, envPath)
 	if err != nil {
 		log.Printf("SaveSettings: falha ao escrever .env: %v", err)
 		return false
 	}
 
-	if chmodErr := os.Chmod("../.env", 0o600); chmodErr != nil {
+	if chmodErr := os.Chmod(envPath, 0o600); chmodErr != nil {
 		log.Printf("SaveSettings: aviso ao aplicar permissão restrita no .env: %v", chmodErr)
 	}
 
