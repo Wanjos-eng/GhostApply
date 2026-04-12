@@ -37,7 +37,7 @@ export function Sidebar({ activeScreen, setActiveScreen }: SidebarProps) {
     };
 
     fetchSystemStatus();
-    const interval = setInterval(fetchSystemStatus, 30000); // Refresh every 30s
+    const interval = setInterval(fetchSystemStatus, 30000); // Atualiza a cada 30s.
     return () => clearInterval(interval);
   }, []);
 
