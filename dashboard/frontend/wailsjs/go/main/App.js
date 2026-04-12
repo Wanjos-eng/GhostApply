@@ -14,12 +14,20 @@ export function FetchInterviews() {
   return window['go']['main']['App']['FetchInterviews']();
 }
 
+export function FetchProspectedJobs() {
+  return window['go']['main']['App']['FetchProspectedJobs']();
+}
+
 export function GenerateOutreachMessage(arg1, arg2) {
   return window['go']['main']['App']['GenerateOutreachMessage'](arg1, arg2);
 }
 
 export function GerarDossieEstudos(arg1) {
   return window['go']['main']['App']['GerarDossieEstudos'](arg1);
+}
+
+export function GetProspectedMetrics() {
+  return window['go']['main']['App']['GetProspectedMetrics']();
 }
 
 export function GetSystemStatus() {
