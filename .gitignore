@@ -2,6 +2,7 @@
 bin/
 *.exe
 *.log
+scraper
 
 # Go
 vendor/
