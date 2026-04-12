@@ -10,6 +10,24 @@ import (
 	"github.com/emersion/go-message/mail"
 )
 
+func composeIMAPAddr(server, port string) string {
+	srv := strings.TrimSpace(server)
+	if srv == "" {
+		srv = "imap.gmail.com"
+	}
+
+	if strings.Contains(srv, ":") {
+		return srv
+	}
+
+	p := strings.TrimSpace(port)
+	if p == "" {
+		p = "993"
+	}
+
+	return srv + ":" + p
+}
+
 // IMAPListener concentra a conexão IMAP e a extração das mensagens.
 type IMAPListener struct {
 	client *client.Client
@@ -18,7 +36,7 @@ type IMAPListener struct {
 // NewIMAPListener conecta ao IMAP via TLS usando as credenciais do .env.
 // A configuração padrão prioriza estabilidade de TLS.
 func NewIMAPListener() (*IMAPListener, error) {
-	addr := os.Getenv("IMAP_SERVER") + ":" + os.Getenv("IMAP_PORT")
+	addr := composeIMAPAddr(os.Getenv("IMAP_SERVER"), os.Getenv("IMAP_PORT"))
 	
 	log.Println("IMAP: Connecting to server...")
 	// Conexão IMAP com TLS seguro.
@@ -29,6 +47,7 @@ func NewIMAPListener() (*IMAPListener, error) {
 
 	log.Println("IMAP: Logging in...")
 	if err := c.Login(os.Getenv("IMAP_USER"), os.Getenv("IMAP_PASS")); err != nil {
+		_ = c.Logout()
 		return nil, err
 	}
 	
