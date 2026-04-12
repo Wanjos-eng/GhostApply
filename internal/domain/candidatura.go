@@ -5,7 +5,7 @@ type CandidaturaForjada struct {
 	ID            string
 	VagaID        string
 	CurriculoPath string
-	Status        Status // Typically "FORJADO", "APLICADA", or "ERRO"
+	Status        Status // Normalmente: FORJADO, APLICADA ou ERRO.
 }
 
 // VagaComCandidatura agrupa a vaga e a candidatura correspondente.
