@@ -58,7 +58,7 @@ export function Sidebar({ activeScreen, setActiveScreen }: SidebarProps) {
         </button>
         <button onClick={() => setActiveScreen('history')} className={`w-full text-left ${getNavClass('history')}`}>
           <span className="material-symbols-outlined text-[1.25rem]">history</span>
-          Histórico
+          History
         </button>
         <button onClick={() => setActiveScreen('profile')} className={`w-full text-left ${getNavClass('profile')}`}>
           <span className="material-symbols-outlined text-[1.25rem]">account_circle</span>
