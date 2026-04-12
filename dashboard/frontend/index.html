@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html class="light" lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>GhostApply Dashboard</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+    <script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "secondary-fixed": "#d8e2ff",
+                        "inverse-primary": "#aec6ff",
+                        "error": "#ba1a1a",
+                        "outline": "#727786",
+                        "surface-tint": "#0059c5",
+                        "surface-container-low": "#f3f3f3",
+                        "tertiary": "#a23d00",
+                        "on-primary": "#ffffff",
+                        "on-secondary-fixed": "#001a43",
+                        "secondary": "#435d94",
+                        "primary-fixed": "#d8e2ff",
+                        "surface-bright": "#f9f9f9",
+                        "tertiary-container": "#ca4e00",
+                        "on-secondary-fixed-variant": "#2a467b",
+                        "primary": "#0058c3",
+                        "inverse-on-surface": "#f0f1f1",
+                        "on-background": "#1a1c1c",
+                        "surface-container-highest": "#e2e2e2",
+                        "error-container": "#ffdad6",
+                        "surface": "#f9f9f9",
+                        "on-error-container": "#93000a",
+                        "surface-container-high": "#e8e8e8",
+                        "outline-variant": "#c1c6d7",
+                        "on-tertiary-container": "#fffeff",
+                        "background": "#f9f9f9",
+                        "tertiary-fixed": "#ffdbcd",
+                        "on-surface": "#1a1c1c",
+                        "surface-container": "#eeeeee",
+                        "on-primary-container": "#ffffff",
+                        "on-primary-fixed-variant": "#004397",
+                        "on-tertiary": "#ffffff",
+                        "secondary-fixed-dim": "#aec6ff",
+                        "on-primary-fixed": "#001a43",
+                        "surface-variant": "#e2e2e2",
+                        "surface-dim": "#dadada",
+                        "tertiary-fixed-dim": "#ffb596",
+                        "secondary-container": "#a6c1fe",
+                        "on-tertiary-fixed": "#360f00",
+                        "on-tertiary-fixed-variant": "#7d2d00",
+                        "inverse-surface": "#2f3131",
+                        "on-secondary-container": "#334e83",
+                        "primary-container": "#0070f3",
+                        "primary-fixed-dim": "#aec6ff",
+                        "on-surface-variant": "#414754",
+                        "on-secondary": "#ffffff",
+                        "surface-container-lowest": "#ffffff",
+                        "on-error": "#ffffff"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "fontFamily": {
+                        "headline": ["Inter"],
+                        "body": ["Inter"],
+                        "label": ["Inter"],
+                        "mono": ["JetBrains Mono"]
+                    }
+                },
+            },
+        }
+    </script>
+    <style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        body {
+            background-color: #f9f9f9;
+            color: #1a1c1c;
+            font-family: 'Inter', sans-serif;
+            min-height: max(884px, 100dvh);
+        }
+    </style>
+</head>
+<body class="flex min-h-screen">
+    <div id="root" class="flex min-h-screen w-full"></div>
+    <script src="./src/main.tsx" type="module"></script>
+</body>
+</html>
