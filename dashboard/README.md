@@ -1,19 +1,62 @@
-# README
+# Dashboard (Wails)
 
-## About
+Aplicação desktop operacional do GhostApply.
 
-This is the official Wails React-TS template.
+## Stack
 
-You can configure the project by editing `wails.json`. More information about the project settings can be found
-here: https://wails.io/docs/reference/project-config
+- Backend desktop: Go (arquivo principal em dashboard/app.go)
+- Frontend desktop: React + TypeScript (dashboard/frontend/src)
+- Bridge: Wails runtime + bindings gerados em dashboard/frontend/wailsjs
 
-## Live Development
+## Responsabilidades
 
-To run in live development mode, run `wails dev` in the project directory. This will run a Vite development
-server that will provide very fast hot reload of your frontend changes. If you want to develop in a browser
-and have access to your Go methods, there is also a dev server that runs on http://localhost:34115. Connect
-to this in your browser, and you can call your Go code from devtools.
+Esta camada concentra o controle em tempo real do pipeline:
 
-## Building
+- Carregar/salvar configurações (Settings)
+- Validar IMAP
+- Ler histórico e emails classificados
+- Acionar StartDaemon para execução do filler
+- Gerar dossiê via Gemini
+- Exibir status de saúde e métricas de performance
 
-To build a redistributable, production mode package, use `wails build`.
+## Métodos Backend Expostos para o Front
+
+Exemplos de métodos do App consumidos pela UI:
+
+- FetchEmails
+- FetchHistory
+- FetchInterviews
+- GetSystemStatus
+- RunPerformanceSuite
+- UploadAndParseCV
+- StartDaemon
+- LoadSettings / SaveSettings / VerifyIMAP
+
+Os bindings do Wails são gerados em:
+
+- frontend/wailsjs/go/main/App.js
+- frontend/wailsjs/go/main/App.d.ts
+- frontend/wailsjs/go/models.ts
+
+## Como Rodar em Desenvolvimento
+
+1. cd dashboard/frontend && npm ci
+2. cd ..
+3. wails dev
+
+## Como Buildar
+
+1. cd dashboard/frontend && npm run build
+2. cd ..
+3. wails build
+
+## Performance no Dashboard
+
+O dashboard inclui uma suíte de medições de backend:
+
+- DB Ping (ms)
+- Fetch History (ms)
+- Fetch Emails (ms)
+- Tempo total da suíte (ms)
+
+Ela roda automaticamente e também pode ser disparada por botão na tela.
