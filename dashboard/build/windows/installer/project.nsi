@@ -94,6 +94,7 @@ Section
     SetOutPath $INSTDIR
 
     !insertmacro wails.files
+    File /nonfatal "..\..\bin\filler.exe"
     File "resources\eula.txt"
     File "resources\privacy.txt"
 
@@ -113,6 +114,7 @@ Section "uninstall"
 
     Delete "$INSTDIR\eula.txt"
     Delete "$INSTDIR\privacy.txt"
+    Delete "$INSTDIR\filler.exe"
 
     RMDir /r $INSTDIR
 
