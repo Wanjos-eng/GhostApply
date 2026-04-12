@@ -72,17 +72,17 @@ func run() error {
 	defer ctx.Close()
 
 	if err := pw.LoadCookies(ctx, sessionPath); err != nil {
-		log.Printf("filler: warning, unable to load cookies: %v", err)
+		log.Printf("filler: aviso, não foi possível carregar cookies: %v", err)
 	}
 
 	// Itera pelas candidaturas carregadas e executa o fluxo de automação.
 	for _, c := range candidaturas {
 		err := processApplication(ctx, groqClient, c)
 		if err != nil {
-			log.Printf("filler: error processing application %s: %v", c.Candidatura.ID, err)
+			log.Printf("filler: erro ao processar candidatura %s: %v", c.Candidatura.ID, err)
 			updateStatus(database, c.Candidatura.ID, domain.StatusErro)
 		} else {
-			log.Printf("filler: application %s successfully sent!", c.Candidatura.ID)
+			log.Printf("filler: candidatura %s enviada com sucesso", c.Candidatura.ID)
 			updateStatus(database, c.Candidatura.ID, domain.StatusAplicada)
 		}
 	}
@@ -116,7 +116,7 @@ func loadForjadoTargets(database *sql.DB) ([]domain.VagaComCandidatura, error) {
 func updateStatus(database *sql.DB, candidaturaID string, status domain.Status) {
 	_, err := database.Exec("UPDATE Candidatura_Forjada SET status = ? WHERE id = ?", string(status), candidaturaID)
 	if err != nil {
-		log.Printf("filler: critical error updating DB status to %s for %s: %v", status, candidaturaID, err)
+		log.Printf("filler: erro crítico ao atualizar status %s para %s: %v", status, candidaturaID, err)
 	}
 }
 
