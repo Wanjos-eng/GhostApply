@@ -6,12 +6,24 @@ export function FetchEmails() {
   return window['go']['main']['App']['FetchEmails']();
 }
 
+export function FetchHistory() {
+  return window['go']['main']['App']['FetchHistory']();
+}
+
 export function FetchInterviews() {
   return window['go']['main']['App']['FetchInterviews']();
 }
 
+export function GenerateOutreachMessage(arg1, arg2) {
+  return window['go']['main']['App']['GenerateOutreachMessage'](arg1, arg2);
+}
+
 export function GerarDossieEstudos(arg1) {
   return window['go']['main']['App']['GerarDossieEstudos'](arg1);
+}
+
+export function GetSystemStatus() {
+  return window['go']['main']['App']['GetSystemStatus']();
 }
 
 export function LoadSettings() {
