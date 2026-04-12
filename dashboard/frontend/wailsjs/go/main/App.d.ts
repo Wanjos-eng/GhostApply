@@ -16,6 +16,8 @@ export function GetSystemStatus():Promise<Record<string, any>>;
 
 export function LoadSettings():Promise<main.SettingsDTO>;
 
+export function RunPerformanceSuite():Promise<main.PerformanceSuiteDTO>;
+
 export function SaveSettings(arg1:main.SettingsDTO):Promise<boolean>;
 
 export function StartDaemon(arg1:main.ProfileDTO):Promise<boolean>;
