@@ -1,15 +1,15 @@
-//! `ghost-apply-core` — Cofre Criptográfico e Pipeline de Candidaturas.
+//! `ghost-apply-core` — Cofre criptográfico e pipeline de candidaturas.
 //!
 //! # Arquitetura (Clean Arch)
 //! ```text
-//! lib.rs            ← ponto de entrada público (entidades + use-cases básicos)
+//! lib.rs            ← ponto de entrada público (entidades + casos de uso básicos)
 //! config.rs         ← carregamento seguro do .env (AppConfig + Zeroize)
 //! database/
 //!   connection.rs   ← fábrica de conexão SQLCipher AES-256
 //!   migrations.rs   ← DDL idempotente (3 tabelas)
 //! llm/
 //!   groq_client.rs  ← triagem remoto/presencial (TLS 1.3)
-//!   gemini_client.rs← geração de currículo adaptado
+//!   gemini_client.rs ← geração de currículo adaptado
 //! pdf/
 //!   generator.rs    ← MD → PDF com CSS corporativo
 //! worker.rs         ← orquestrador do pipeline multi-agente
@@ -67,11 +67,11 @@ impl CandidaturaStatus {
     }
 }
 
-// ── Task 10: insert_vaga ──────────────────────────────────────────────────────
+// ── Inserção de vaga ────────────────────────────────────────────────────────
 
 /// Persiste uma vaga no banco usando `INSERT OR IGNORE`.
 ///
-/// # Intent
+/// # Intenção
 /// Idempotente por design: duas chamadas com o mesmo `vaga.url` resultam em
 /// exatamente uma linha — a segunda é silenciosamente descartada.
 /// Isso é fundamental para scrapers que re-processam a mesma página.
@@ -92,11 +92,11 @@ pub fn insert_vaga(conn: &Connection, vaga: &Vaga) -> Result<()> {
     Ok(())
 }
 
-// ── Task 11: update_status_candidatura ───────────────────────────────────────
+// ── Atualização de status de candidatura ────────────────────────────────────
 
 /// Transiciona o status de uma `Candidatura_Forjada`.
 ///
-/// # Constraint
+/// # Restrição
 /// Retorna `Err` se a candidatura não existir — o chamador deve tratar o caso
 /// de ID inválido; não silenciamos falhas de atualização (zero rows affected).
 pub fn update_status_candidatura(
@@ -118,7 +118,7 @@ pub fn update_status_candidatura(
     Ok(())
 }
 
-// ── Task 12: testes unitários ─────────────────────────────────────────────────
+// ── Testes unitários ────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -164,7 +164,7 @@ mod tests {
 
     #[test]
     fn test_banco_memoria_isolamento_fk_invalida() {
-        // # Intent (Task 12)
+        // # Intenção
         // Validar que o banco rejeita Candidatura_Forjada com vaga_id inexistente.
         // Isso prova que PRAGMA foreign_keys = ON está ativo + schema está correto.
         let conn = banco_em_memoria();
