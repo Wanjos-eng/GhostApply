@@ -20,9 +20,8 @@ export function BaseProfile() {
       if ((window as any).go) {
         const parsedData = await UploadAndParseCV();
         if (parsedData && parsedData.target_roles) {
-          // Received valid parsed profile
           setProfile(parsedData);
-          setCvName("Curriculum_Parsed.pdf");
+          setCvName("Parsed_CV.pdf");
         }
       }
     } catch(e) {
@@ -33,30 +32,30 @@ export function BaseProfile() {
   };
 
   const handleStartDaemon = async () => {
-    setStatus("Forja Engine Inicializando...");
+    setStatus("Starting Forge Engine...");
     try {
       if ((window as any).go) {
         const success = await StartDaemon(profile);
-        if (success) setStatus("✅ Daemon Rodando");
-        else setStatus("❌ Erro ao ligar base");
+        if (success) setStatus("✅ Daemon Running");
+        else setStatus("❌ Failed to start engine");
       }
     } catch (e) {
       console.error(e);
-      setStatus("❌ Falha crítica");
+      setStatus("❌ Critical failure");
     }
   };
 
   return (
     <div className="p-12 max-w-7xl w-full mx-auto space-y-12 overflow-y-auto">
-      {/* Page Header */}
+      {/* Cabeçalho da página */}
       <header className="space-y-2">
         <h1 className="text-4xl font-bold tracking-tight text-zinc-950 font-headline">Base Profile & Target Directives</h1>
         <p className="text-on-surface-variant font-body">Define your core identity and automated application constraints.</p>
       </header>
 
-      {/* Grid Content */}
+      {/* Conteúdo principal */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Left Panel: Profile & CV */}
+        {/* Painel esquerdo: perfil e CV */}
         <section className="lg:col-span-5 space-y-6">
           <div className="bg-surface-container-lowest border border-outline-variant/30 rounded-lg p-8 shadow-sm">
             <div className="flex items-center gap-3 mb-8">
@@ -72,7 +71,7 @@ export function BaseProfile() {
                 <span className={`material-symbols-outlined ${isParsing ? 'animate-spin' : ''}`}>{isParsing ? 'sync' : 'add'}</span>
               </div>
               <div className="space-y-1">
-                <p className="font-medium text-sm">{isParsing ? 'Parsing Document with AI...' : 'Select your Base CV (PDF)'}</p>
+                <p className="font-medium text-sm">{isParsing ? 'Parsing document with AI...' : 'Select your base CV (PDF)'}</p>
                 <p className="text-xs text-on-surface-variant">Max file size: 10MB</p>
               </div>
             </div>
@@ -84,7 +83,7 @@ export function BaseProfile() {
                     <span className="material-symbols-outlined text-primary" data-icon="description">description</span>
                     <div className="flex flex-col">
                       <span className="text-sm font-mono font-medium">{cvName}</span>
-                      <span className="text-[10px] text-zinc-400 uppercase tracking-widest">AI Mapped • 100%</span>
+                      <span className="text-[10px] text-zinc-400 uppercase tracking-widest">AI mapped • 100%</span>
                     </div>
                   </div>
                   <button onClick={() => setCvName("")} className="text-on-surface-variant hover:text-error transition-colors">
@@ -100,7 +99,7 @@ export function BaseProfile() {
             <div className="space-y-4">
               <div className="flex justify-between items-center">
                 <span className="text-xs font-mono">Last Indexed</span>
-                <span className="text-xs font-mono text-primary">{cvName ? 'Hoje' : 'Nunca'}</span>
+                <span className="text-xs font-mono text-primary">{cvName ? 'Today' : 'Never'}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-xs font-mono">Keyword Extraction</span>
@@ -110,7 +109,7 @@ export function BaseProfile() {
           </div>
         </section>
 
-        {/* Right Panel: Automation Directives */}
+        {/* Painel direito: regras de automação */}
         <section className="lg:col-span-7 space-y-6">
           <div className="bg-surface-container-lowest border border-outline-variant/30 rounded-lg p-8 shadow-sm">
             <div className="flex items-center gap-3 mb-8">
@@ -119,14 +118,14 @@ export function BaseProfile() {
             </div>
             
             <form className="space-y-10" onSubmit={e => e.preventDefault()}>
-              {/* Target Roles */}
+              {/* Funções alvo */}
               <div className="space-y-4">
                 <div className="flex justify-between items-end">
                    <label className="text-xs font-bold uppercase tracking-widest text-on-surface-variant">Target Roles</label>
-                   <span className="text-[10px] text-zinc-400 font-mono">{profile.target_roles.length} roles selecionadas</span>
+                   <span className="text-[10px] text-zinc-400 font-mono">{profile.target_roles.length} selected roles</span>
                 </div>
                 
-                {/* Visual Role Input */}
+                {/* Campo visual para as funções alvo */}
                 <div className="flex flex-wrap gap-2 p-3 bg-surface-container-low border border-outline-variant/20 rounded-xl min-h-[56px] focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/50 transition-all">
                   {profile.target_roles.map(r => (
                     <span key={r} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white shadow-sm border border-outline-variant/50 rounded-full text-xs font-semibold animate-in fade-in zoom-in duration-200">
@@ -146,7 +145,7 @@ export function BaseProfile() {
                   </datalist>
                 </div>
 
-                {/* Intelligent Promoted Chips */}
+                {/* Sugestões rápidas */}
                 <div className="flex flex-wrap gap-2 mt-2">
                    {["Backend Engineer", "Tech Lead", "Data Engineer"].filter(r => !profile.target_roles.includes(r)).map(sug => (
                       <button type="button" key={sug} onClick={() => setProfile({...profile, target_roles: [...profile.target_roles, sug]})} className="inline-flex items-center gap-1 px-3 py-1 bg-zinc-50 hover:bg-zinc-100 border border-dashed border-zinc-300 rounded-full text-[11px] text-zinc-500 font-medium transition-colors">
@@ -156,11 +155,11 @@ export function BaseProfile() {
                 </div>
               </div>
 
-              {/* Core Stack */}
+              {/* Stack principal */}
               <div className="space-y-4">
                 <div className="flex justify-between items-end">
                    <label className="text-xs font-bold uppercase tracking-widest text-on-surface-variant">Core Stack</label>
-                   <span className="text-[10px] text-zinc-400 font-mono">{profile.core_stack.length} tecnologias</span>
+                   <span className="text-[10px] text-zinc-400 font-mono">{profile.core_stack.length} technologies</span>
                 </div>
                 
                 <div className="flex flex-wrap gap-2 p-3 bg-surface-container-low border border-outline-variant/20 rounded-xl min-h-[56px] focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/50 transition-all">
@@ -193,10 +192,10 @@ export function BaseProfile() {
 
               <hr className="border-outline-variant/10" />
 
-              {/* Strict Variables Setup */}
+              {/* Variáveis fixas */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 
-                {/* Salary Input formatted as Currency */}
+                {/* Salário mínimo */}
                 <div className="space-y-3">
                    <label className="text-xs font-bold uppercase tracking-widest text-on-surface-variant flex items-center gap-2">
                      <span className="material-symbols-outlined text-[14px]">payments</span> Min Salary Floor
@@ -207,7 +206,7 @@ export function BaseProfile() {
                         type="text"
                         value={profile.min_salary_floor} 
                         onChange={e => {
-                          // Allow numbers only, format as currency representation
+                          // Aceita só números e formata como moeda.
                           const rawNum = e.target.value.replace(/\D/g, '');
                           const formatted = rawNum ? new Intl.NumberFormat('en-US').format(Number(rawNum)) : '';
                           setProfile({...profile, min_salary_floor: formatted});
@@ -218,7 +217,7 @@ export function BaseProfile() {
                    <p className="text-[10px] text-zinc-400">Daemon skips jobs falling below this minimal bar.</p>
                 </div>
 
-                {/* Range Slider for Application Velocity */}
+                {/* Velocidade máxima de candidaturas */}
                 <div className="space-y-3">
                    <div className="flex justify-between items-end">
                        <label className="text-xs font-bold uppercase tracking-widest text-on-surface-variant flex items-center gap-2">
@@ -244,7 +243,7 @@ export function BaseProfile() {
                 </div>
               </div>
 
-              {/* Toggle Switch */}
+              {/* Alternância de remoto */}
               <div className="p-4 bg-blue-50/50 border border-blue-100 rounded-xl flex items-center justify-between">
                 <div className="space-y-1">
                   <p className="font-semibold text-sm text-blue-950 flex items-center gap-2">
@@ -267,7 +266,7 @@ export function BaseProfile() {
         </section>
       </div>
 
-      {/* Floating Footer Action Area */}
+      {/* Ação principal */}
       <footer className="flex justify-between items-center pt-8 border-t border-outline-variant/20">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
