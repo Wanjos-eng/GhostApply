@@ -28,7 +28,10 @@ const SCHEMA_SQL: &str = "
 -- ── Task 07: Vaga_Prospectada ────────────────────────────────────────────────
 -- Registro de vagas identificadas nos portais (fonte de verdade do pipeline).
 -- `url` é UNIQUE para garantir idempotência no scraping (INSERT OR IGNORE).
--- `status` controla o ciclo de vida: NOVA → ANALISADA → DESCARTADA
+-- `status` controla o ciclo de vida completo do pipeline:
+--   NOVA → PENDENTE → ANALISADA → DESCARTADA
+--                   → REJEITADO_PRESENCIAL (Groq: não é remoto)
+--                   → FORJADO (Gemini gerou CV)
 CREATE TABLE IF NOT EXISTS Vaga_Prospectada (
     id        TEXT PRIMARY KEY NOT NULL,
     titulo    TEXT NOT NULL,
@@ -36,14 +39,19 @@ CREATE TABLE IF NOT EXISTS Vaga_Prospectada (
     url       TEXT NOT NULL UNIQUE,
     descricao TEXT,
     status    TEXT NOT NULL DEFAULT 'NOVA'
-                  CHECK (status IN ('NOVA', 'ANALISADA', 'DESCARTADA')),
+                  CHECK (status IN (
+                      'NOVA', 'PENDENTE', 'ANALISADA',
+                      'REJEITADO_PRESENCIAL', 'FORJADO', 'DESCARTADA'
+                  )),
     criado_em TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
 -- ── Task 08: Candidatura_Forjada ─────────────────────────────────────────────
 -- Candidatura gerada para uma vaga (1 vaga pode ter N tentativas de envio).
 -- FK com ON DELETE CASCADE: remover a vaga apaga suas candidaturas.
--- `status` segue a máquina de estados: RASCUNHO → ENVIADA → CONFIRMADA | REJEITADA
+-- `status` segue a máquina de estados completa:
+--   RASCUNHO → FORJADO → ENVIADA → APLICADA → CONFIRMADA | REJEITADA
+--                                            → ERRO
 CREATE TABLE IF NOT EXISTS Candidatura_Forjada (
     id             TEXT PRIMARY KEY NOT NULL,
     vaga_id        TEXT NOT NULL
@@ -51,7 +59,10 @@ CREATE TABLE IF NOT EXISTS Candidatura_Forjada (
     curriculo_path TEXT,
     carta_path     TEXT,
     status         TEXT NOT NULL DEFAULT 'RASCUNHO'
-                       CHECK (status IN ('RASCUNHO', 'ENVIADA', 'CONFIRMADA', 'REJEITADA')),
+                       CHECK (status IN (
+                           'RASCUNHO', 'FORJADO', 'ENVIADA',
+                           'APLICADA', 'CONFIRMADA', 'REJEITADA', 'ERRO'
+                       )),
     enviado_em     TEXT,
     criado_em      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
@@ -64,6 +75,8 @@ CREATE TABLE IF NOT EXISTS Email_Recrutador (
     vaga_id      TEXT REFERENCES Vaga_Prospectada(id) ON DELETE SET NULL,
     email        TEXT NOT NULL,
     nome         TEXT,
+    classificacao TEXT DEFAULT 'OUTRO' CHECK (classificacao IN ('ENTREVISTA', 'REJEICAO', 'OUTRO')),
+    corpo        TEXT,
     capturado_em TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 ";
