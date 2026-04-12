@@ -1,33 +1,44 @@
+
+
 import { useEffect, useState } from 'react';
-import { LoadSettings } from "../../wailsjs/go/main/App";
 
 interface SidebarProps {
   activeScreen: string;
   setActiveScreen: (screen: string) => void;
 }
 
+interface SystemStatus {
+  database: string;
+  cohere: string;
+  groq: string;
+  gemini: string;
+  imap: string;
+}
+
 export function Sidebar({ activeScreen, setActiveScreen }: SidebarProps) {
-  const [identity, setIdentity] = useState({ name: "Ghost Agent", initials: "GA" });
+  const [systemStatus, setSystemStatus] = useState<SystemStatus>({
+    database: "...",
+    cohere: "...",
+    groq: "...",
+    gemini: "...",
+    imap: "..."
+  });
 
   useEffect(() => {
-    const fetchIdentity = async () => {
-      if ((window as any).go) {
+    const fetchSystemStatus = async () => {
+      if ((window as any).go?.main?.App?.GetSystemStatus) {
         try {
-          const cfg = await LoadSettings();
-          if (cfg && cfg.imap_user) {
-            const raw = cfg.imap_user.split('@')[0];
-            const parts = raw.split(/[._-]/); // Split by common email separators
-            const formattedName = parts.map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
-            
-            const initials = parts.slice(0, 2).map(p => p.charAt(0).toUpperCase()).join('');
-            setIdentity({ name: formattedName, initials: initials || raw.charAt(0).toUpperCase() });
-          }
+          const status = await (window as any).go.main.App.GetSystemStatus();
+          setSystemStatus(status);
         } catch (err) {
-          console.error("Error loading identity from settings:", err);
+          console.error("Error loading system status:", err);
         }
       }
     };
-    fetchIdentity();
+
+    fetchSystemStatus();
+    const interval = setInterval(fetchSystemStatus, 30000); // Refresh every 30s
+    return () => clearInterval(interval);
   }, []);
 
   const getNavClass = (screen: string) => {
@@ -40,18 +51,6 @@ export function Sidebar({ activeScreen, setActiveScreen }: SidebarProps) {
 
   return (
     <aside className="w-[240px] h-screen bg-white border-r border-zinc-100 flex flex-col py-6 px-4 shrink-0">
-      <div className="mb-8 px-2 flex items-center gap-3">
-        <div className="w-9 h-9 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold font-headline text-sm shadow-sm ring-2 ring-blue-100">
-           {identity.initials}
-        </div>
-        <div className="flex-1 w-0">
-          <p className="font-headline font-semibold text-sm text-zinc-900 leading-none truncate">{identity.name}</p>
-          <div className="flex items-center gap-1.5 mt-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-500 shadow-[0_0_4px_rgba(34,197,94,0.6)]"></span>
-            <p className="text-[0.6875rem] font-medium text-zinc-500 uppercase tracking-wider">Online</p>
-          </div>
-        </div>
-      </div>
       <nav className="space-y-1">
         <button onClick={() => setActiveScreen('dashboard')} className={`w-full text-left ${getNavClass('dashboard')}`}>
           <span className="material-symbols-outlined text-[1.25rem]">dashboard</span>
@@ -77,7 +76,28 @@ export function Sidebar({ activeScreen, setActiveScreen }: SidebarProps) {
       <div className="mt-auto px-2">
         <div className="p-3 bg-surface-container-low rounded-lg">
           <p className="text-[0.6875rem] font-mono text-zinc-400 uppercase mb-2">System Status</p>
-          <p className="text-[0.75rem] font-mono text-blue-600 font-bold">STABLE_V.2.4.0</p>
+          <div className="space-y-1">
+            <div className="flex justify-between text-[0.65rem] font-mono">
+              <span className="text-zinc-500">DB</span>
+              <span className="text-blue-600 font-semibold">{systemStatus.database}</span>
+            </div>
+            <div className="flex justify-between text-[0.65rem] font-mono">
+              <span className="text-zinc-500">Cohere</span>
+              <span className="text-blue-600 font-semibold">{systemStatus.cohere}</span>
+            </div>
+            <div className="flex justify-between text-[0.65rem] font-mono">
+              <span className="text-zinc-500">Groq</span>
+              <span className="text-blue-600 font-semibold">{systemStatus.groq}</span>
+            </div>
+            <div className="flex justify-between text-[0.65rem] font-mono">
+              <span className="text-zinc-500">Gemini</span>
+              <span className="text-blue-600 font-semibold">{systemStatus.gemini}</span>
+            </div>
+            <div className="flex justify-between text-[0.65rem] font-mono">
+              <span className="text-zinc-500">IMAP</span>
+              <span className="text-blue-600 font-semibold">{systemStatus.imap}</span>
+            </div>
+          </div>
         </div>
       </div>
     </aside>
