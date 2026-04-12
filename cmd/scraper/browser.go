@@ -1,8 +1,8 @@
-// Package main — browser wiring for the GhostApply scraper.
+// Package main — integração do navegador para o scraper do GhostApply.
 //
-// # Intent
-// Isolate all Playwright browser lifecycle concerns: launching, anti-bot hardening,
-// cookie injection and human-like timing. Nothing here touches business logic.
+// # Intenção
+// Isola o ciclo de vida do Playwright: abertura do navegador, endurecimento
+// contra bot, injeção de cookies e cadência humana. Nada aqui toca regra de negócio.
 package main
 
 import (
@@ -15,14 +15,14 @@ import (
 	"github.com/playwright-community/playwright-go"
 )
 
-// NewBrowser launches a Chromium instance with anti-bot hardening applied.
+// NewBrowser abre uma instância do Chromium com endurecimento contra bot.
 //
-// # Anti-Bot (Task 16)
-// --disable-blink-features=AutomationControlled hides the `navigator.webdriver`
-// property that bot-detection services (Cloudflare, LinkedIn ThrustBuster) check.
+// # Anti-Bot (Tarefa 16)
+// --disable-blink-features=AutomationControlled oculta o `navigator.webdriver`.
+// Serviços de detecção de bot costumam usar esse sinal.
 func NewBrowser(pw *playwright.Playwright) (playwright.Browser, error) {
 	browser, err := pw.Chromium.Launch(playwright.BrowserTypeLaunchOptions{
-		Headless: playwright.Bool(true), // Task 15: invisible to the OS
+		Headless: playwright.Bool(true), // Tarefa 15: executa sem janela visível.
 		Args: []string{
 			"--disable-blink-features=AutomationControlled",
 			"--disable-infobars",
@@ -38,7 +38,7 @@ func NewBrowser(pw *playwright.Playwright) (playwright.Browser, error) {
 	return browser, nil
 }
 
-// cookieFile mirrors the structure of a Playwright-exported session.json entry.
+// cookieFile espelha a estrutura de uma entrada session.json exportada pelo Playwright.
 type cookieFile struct {
 	Name     string  `json:"name"`
 	Value    string  `json:"value"`
@@ -50,11 +50,10 @@ type cookieFile struct {
 	SameSite string  `json:"sameSite"`
 }
 
-// LoadCookies reads a Playwright session.json and injects all cookies into ctx.
+// LoadCookies lê um session.json do Playwright e injeta os cookies no contexto.
 //
-// # Intent (Task 17)
-// Reusing an exported browser session avoids triggering LinkedIn's login-wall
-// and CAPTCHA flows that fire on fresh sessions from headless browsers.
+// # Intenção (Tarefa 17)
+// Reutilizar uma sessão exportada evita cair no login wall e em CAPTCHA.
 func LoadCookies(ctx playwright.BrowserContext, path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -89,12 +88,11 @@ func LoadCookies(ctx playwright.BrowserContext, path string) error {
 	return nil
 }
 
-// HumanSleep pauses execution for a random duration between 1000ms and 4500ms.
+// HumanSleep pausa a execução por uma duração aleatória entre 1000ms e 4500ms.
 //
-// # Anti-Bot (Task 19)
-// Uniform timing patterns are a primary signal for bot-detection ML models.
-// Randomised delays mimic human reading/browsing cadence and reduce the
-// fingerprint entropy that triggers rate-limiting on LinkedIn.
+// # Anti-Bot (Tarefa 19)
+// Padrões de tempo muito uniformes entregam automação.
+// Atrasos aleatórios imitam leitura humana e reduzem a chance de rate limit.
 func HumanSleep() {
 	const (
 		minMs = 1000
