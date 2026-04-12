@@ -4,9 +4,15 @@ import {main} from '../models';
 
 export function FetchEmails():Promise<Array<main.EmailRecrutador>>;
 
+export function FetchHistory():Promise<Array<main.VagaHistoricoDTO>>;
+
 export function FetchInterviews():Promise<Array<main.EmailRecrutador>>;
 
+export function GenerateOutreachMessage(arg1:string,arg2:string):Promise<string>;
+
 export function GerarDossieEstudos(arg1:string):Promise<string>;
+
+export function GetSystemStatus():Promise<Record<string, any>>;
 
 export function LoadSettings():Promise<main.SettingsDTO>;
 
