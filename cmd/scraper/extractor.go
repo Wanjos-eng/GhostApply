@@ -17,14 +17,14 @@ const linkedInJobsBaseURL = "https://www.linkedin.com/jobs/search/"
 
 // NavigateToLinkedInSearch abre uma busca do LinkedIn filtrada para 100% remoto.
 //
-// # Intenção (Tarefa 18)
+// # Intenção
 // f_WT=2 é o parâmetro do LinkedIn para vagas remotas.
 // Fixar esse filtro evita coletar vagas presenciais por acidente.
 func NavigateToLinkedInSearch(page playwright.Page, keywords string) error {
 	params := url.Values{}
 	params.Set("keywords", keywords)
-	params.Set("f_WT", "2")   // 100% Remote — mandatory filter
-	params.Set("f_TPR", "r86400") // Last 24 hours — freshness filter
+	params.Set("f_WT", "2")      // Filtro obrigatório de vaga remota.
+	params.Set("f_TPR", "r86400") // Filtro de recorte nas últimas 24h.
 
 	target := linkedInJobsBaseURL + "?" + params.Encode()
 
@@ -40,7 +40,7 @@ func NavigateToLinkedInSearch(page playwright.Page, keywords string) error {
 
 // ExtractVagas extrai todos os cards visíveis da página atual de resultados.
 //
-// # Concorrência (Tarefa 20)
+// # Concorrência
 // Cada card é processado de forma sequencial porque a página do Playwright não
 // é thread-safe. Se uma vaga falhar, o restante continua normalmente.
 func ExtractVagas(page playwright.Page) ([]domain.Vaga, error) {
