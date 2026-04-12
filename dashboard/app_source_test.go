@@ -44,3 +44,27 @@ func TestParseCreatedAt(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeDatabasePath(t *testing.T) {
+	appDir := "/tmp/ghostapply"
+
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "empty uses default", input: "", want: "/tmp/ghostapply/forja_ghost.sqlite"},
+		{name: "legacy file uri with pragma", input: "file:forja_ghost.sqlite?_pragma=key('x')", want: "/tmp/ghostapply/forja_ghost.sqlite"},
+		{name: "quoted relative path", input: "'db/custom.sqlite'", want: "/tmp/ghostapply/db/custom.sqlite"},
+		{name: "memory preserved", input: ":memory:", want: ":memory:"},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := normalizeDatabasePath(c.input, appDir)
+			if got != c.want {
+				t.Fatalf("normalizeDatabasePath(%q)=%q want=%q", c.input, got, c.want)
+			}
+		})
+	}
+}
