@@ -5,7 +5,7 @@
 // às vezes conteúdo adversarial para manipular LLMs (prompt injection).
 // Este pacote remove agressivamente tudo que não seja texto legível.
 //
-// # Restrição (SecOps — Tarefa 24)
+// # Restrição (SecOps)
 // Tudo isso precisa sair antes do texto entrar no pipeline de IA:
 //   - blocos <script> e <style> (vetores de execução de código)
 //   - endereços de email (vazamento de PII e isca de prompt injection)
