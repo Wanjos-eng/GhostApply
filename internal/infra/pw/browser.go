@@ -10,10 +10,10 @@ import (
 	"github.com/playwright-community/playwright-go"
 )
 
-// NewBrowser launches a Chromium instance with anti-bot hardening applied.
+// NewBrowser abre uma instância do Chromium com endurecimento contra bot.
 func NewBrowser(pw *playwright.Playwright) (playwright.Browser, error) {
 	browser, err := pw.Chromium.Launch(playwright.BrowserTypeLaunchOptions{
-		Headless: playwright.Bool(false), // For debugging filler we can use headless false. If strictly needed we make it a param
+		Headless: playwright.Bool(false), // Durante depuração, o filler pode rodar com interface visível.
 		Args: []string{
 			"--disable-blink-features=AutomationControlled",
 			"--disable-infobars",
@@ -40,7 +40,7 @@ type cookieFile struct {
 	SameSite string  `json:"sameSite"`
 }
 
-// LoadCookies reads a session.json into BrowserContext.
+// LoadCookies lê um session.json e injeta os cookies no BrowserContext.
 func LoadCookies(ctx playwright.BrowserContext, path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -75,7 +75,7 @@ func LoadCookies(ctx playwright.BrowserContext, path string) error {
 	return nil
 }
 
-// HumanSleep pauses execution for a random duration
+// HumanSleep pausa a execução por uma duração aleatória.
 func HumanSleep() {
 	const (
 		minMs = 1000
@@ -91,7 +91,7 @@ func TypeHumanly(loc playwright.Locator, text string) error {
 		return fmt.Errorf("TypeHumanly: failed to clear initial field: %w", err)
 	}
 	
-	// Click inside to simulate focus like human
+	// Clica no campo para simular o foco de uma pessoa.
 	if err := loc.Click(); err != nil {
 		return fmt.Errorf("TypeHumanly: failed to focus field: %w", err)
 	}
