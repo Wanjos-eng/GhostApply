@@ -1,0 +1,20 @@
+# Binários e logs
+bin/
+*.exe
+*.log
+
+# Go
+vendor/
+go.sum
+
+# Rust
+target/
+Cargo.lock
+
+# Ambiente
+.env
+.env.*
+!.env.example
+
+# VS Code
+.vscode/
