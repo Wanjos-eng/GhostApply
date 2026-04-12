@@ -1,10 +1,10 @@
 //! Gerador de PDF a partir de Markdown — pipeline MD → HTML → PDF.
 //!
-//! # Intenção (Tarefas 33–37)
+//! # Intenção
 //! Recebe a saída bruta do Gemini, extrai apenas o bloco Markdown útil,
 //! aplica CSS corporativo e gera um PDF em `/tmp/forja/{uuid}-cv.pdf`.
 //!
-//! # Restrição (SecOps — Tarefa 37)
+//! # Restrição (SecOps)
 //! PDFs são salvos em diretório isolado com nome UUID dinâmico para evitar
 //! colisões e impedir acesso previsível (path traversal).
 
@@ -37,13 +37,13 @@ p { margin: 6px 0; }
 ///
 /// Remove saudações, comentários e artefatos que a IA pode gerar
 /// apesar do prompt rígido. Se houver um bloco ```markdown```, extrai o conteúdo
-/// interno. Caso contrário, retorna o texto após limpar linhas de greeting.
+/// interno. Caso contrário, retorna o texto após limpar linhas de saudação.
 pub fn extract_markdown_block(llm_output: &str) -> String {
     let trimmed = llm_output.trim();
 
-    // Se a IA envolveu a resposta em ```markdown ... ```, extrair o interior
+    // Se a IA envolveu a resposta em ```markdown ... ```, extrai o interior.
     if let Some(start) = trimmed.find("```markdown") {
-        let content = &trimmed[start + 11..]; // skip "```markdown"
+        let content = &trimmed[start + 11..]; // pula o prefixo "```markdown"
         if let Some(end) = content.find("```") {
             return content[..end].trim().to_string();
         }
@@ -57,7 +57,7 @@ pub fn extract_markdown_block(llm_output: &str) -> String {
         }
     }
 
-    // Fallback: remover linhas de greeting comuns
+    // Fallback: remove linhas de saudação comuns.
     let lines: Vec<&str> = trimmed
         .lines()
         .filter(|line| {
