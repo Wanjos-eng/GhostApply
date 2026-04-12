@@ -47,6 +47,9 @@ func TestMatchesCountryBR(t *testing.T) {
 	if !matchesCountry("vaga remota para brasil", "BR") {
 		t.Fatalf("deveria aceitar vaga BR")
 	}
+	if matchesCountry("fully remote role for global candidates", "BR") {
+		t.Fatalf("não deveria aceitar remoto genérico sem contexto BR")
+	}
 	if matchesCountry("onsite madrid spain", "BR") {
 		t.Fatalf("não deveria aceitar vaga claramente fora de BR")
 	}
