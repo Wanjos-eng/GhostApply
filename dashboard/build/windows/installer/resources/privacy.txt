@@ -1,0 +1,35 @@
+GhostApply - Privacy Notice
+
+Last update: 2026-04-12
+
+1. Scope
+This notice describes how GhostApply handles data in local desktop usage.
+
+2. Data Processed
+Depending on configuration, GhostApply may process:
+- job listing metadata,
+- recruiter email content,
+- CV parsing output,
+- local configuration and API keys.
+
+3. Processing Location
+By default, data is processed and stored locally on the user machine.
+No centralized GhostApply cloud service is required for local operation.
+
+4. Third-Party Services
+When enabled by the user, GhostApply may send prompts/data to third-party providers (for example, LLM APIs and email services).
+Those providers have their own privacy terms and policies.
+
+5. Retention and Deletion
+GhostApply can apply local retention policies for operational data.
+Users are responsible for backup and deletion practices.
+
+6. User Control
+Users can modify local settings, rotate credentials, and remove data by deleting local files/databases.
+
+7. Legal Basis and Compliance
+Users are responsible for ensuring lawful processing and transparency obligations under applicable law (including LGPD where applicable).
+
+8. Contact
+Project repository and support channel:
+https://github.com/Wanjos-eng/GhostApply

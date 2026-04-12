@@ -1,0 +1,39 @@
+GhostApply - End User License Agreement (EULA)
+
+Last update: 2026-04-12
+
+1. Acceptance
+By installing or using GhostApply, you agree to this EULA.
+If you do not agree, do not install or use the software.
+
+2. License Grant
+You are granted a personal, non-exclusive, non-transferable license to use GhostApply.
+
+3. User Responsibility and Legal Compliance
+You are solely responsible for how you use automation features.
+You must comply with:
+- platform terms of use (job boards, email providers, APIs),
+- applicable labor and anti-spam rules,
+- privacy and data protection laws in your jurisdiction (including LGPD when applicable).
+
+4. Credentials and Sensitive Data
+GhostApply may process API keys, email credentials, and application data locally.
+You are responsible for protecting your machine, credentials, backups, and access controls.
+
+5. No Legal Advice
+GhostApply and its documentation do not provide legal advice.
+Consult a qualified professional for compliance decisions.
+
+6. Disclaimer of Warranty
+The software is provided "AS IS", without warranties of any kind, express or implied.
+
+7. Limitation of Liability
+To the maximum extent permitted by law, the authors are not liable for indirect, incidental, or consequential damages arising from use of the software.
+
+8. Termination
+This license terminates automatically if you violate this agreement.
+On termination, stop using and remove installed copies.
+
+9. Contact
+Project repository and support channel:
+https://github.com/Wanjos-eng/GhostApply
