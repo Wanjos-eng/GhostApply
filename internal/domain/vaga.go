@@ -13,6 +13,21 @@ const (
 	// StatusPendente means the vaga is queued for AI analysis.
 	StatusPendente Status = "PENDENTE"
 
+	// StatusAnalisada means the vaga was analyzed by the Rust worker.
+	StatusAnalisada Status = "ANALISADA"
+
+	// StatusForjado means the job has a generated PDF resume.
+	StatusForjado Status = "FORJADO"
+
+	// StatusAplicada means the filler successfully applied to the job.
+	StatusAplicada Status = "APLICADA"
+
+	// StatusErro means the filler or worker encountered an unrecoverable error.
+	StatusErro Status = "ERRO"
+
+	// StatusRejeitadoPresencial means Groq rejected it as non-remote.
+	StatusRejeitadoPresencial Status = "REJEITADO_PRESENCIAL"
+
 	// StatusDescartada means the vaga was filtered out.
 	StatusDescartada Status = "DESCARTADA"
 )
