@@ -126,7 +126,7 @@ Na UI essa mesma coleta aparece em `dashboard/frontend/src/components/DashboardV
 
 ## Testes de Performance (Go + Rust)
 
-Os testes abaixo são os que eu considero mais úteis para entrevista técnica e revisão de engenharia.
+Guia prático para medir desempenho real do sistema em ambiente local.
 
 ### O que medir (essencial)
 
@@ -192,14 +192,14 @@ Métricas para reportar:
 
 Esse número é de suíte em release, não de benchmark dedicado. Ainda não tem `cargo bench` no repositório.
 
-### Cenários que recrutadores gostam de ver
+### Cenários recomendados de validação
 
 - Cenário A: banco vazio (cold start).
 - Cenário B: banco com volume realista (ex.: 1k vagas, 5k emails).
 - Cenário C: burst de leituras simultâneas no dashboard.
 - Cenário D: geração de dossiês em sequência (N execuções).
 
-Formato de apresentação recomendado:
+Formato recomendado de registro dos resultados:
 
 - Ambiente de teste (CPU, RAM, SO, versão Go/Rust).
 - Comando exato executado.
