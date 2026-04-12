@@ -12,13 +12,13 @@ import (
 
 const groqAPIURL = "https://api.groq.com/openai/v1/chat/completions"
 
-// GroqClient handles interaction with Groq's Llama 3 API.
+// GroqClient concentra a integração com a API Llama 3 da Groq.
 type GroqClient struct {
 	apiKey string
 	client *http.Client
 }
 
-// NewGroqClient initializes a new Groq client.
+// NewGroqClient inicializa um novo cliente Groq.
 func NewGroqClient(apiKey string) *GroqClient {
 	return &GroqClient{
 		apiKey: apiKey,
@@ -47,7 +47,7 @@ type groqResponse struct {
 	} `json:"choices"`
 }
 
-// AnswerFormField consults Llama 3 for the answer to a complex application form field.
+// AnswerFormField consulta a Llama 3 para responder campos complexos de formulário.
 func (g *GroqClient) AnswerFormField(question string, profileContext string) (string, error) {
 	systemPrompt := `You are an automated assistant helping to fill out a job application form.
 You are provided with a specific field question/label, and the candidate's profile context.
@@ -56,8 +56,8 @@ If it is a yes/no question, answer with only Yes or No.
 Do not add any greetings, explanations, or extra punctuation. Only the direct answer.`
 
 	reqBody := groqRequest{
-		Model:       "llama3-8b-8192", // Using Llama 3 8B for fast, standard inference
-		Temperature: 0.1,              // Low temperature for deterministic output
+		Model:       "llama3-8b-8192", // Usa o modelo 8B para respostas rápidas e estáveis.
+		Temperature: 0.1,              // Temperatura baixa para reduzir variação.
 		Messages: []message{
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: fmt.Sprintf("Candidate Profile Context:\n%s\n\nForm Question:\n%s", profileContext, question)},
