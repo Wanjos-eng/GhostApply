@@ -1,10 +1,10 @@
 //! Cliente HTTP para a API do Groq (LLM rápido para triagem).
 //!
-//! # Intent (Tasks 26–28)
+//! # Intenção (Tarefas 26–28)
 //! Classificar se uma vaga é exclusivamente remota usando um system prompt
 //! rígido que força resposta SIM/NAO. Funciona como primeiro filtro do pipeline.
 //!
-//! # Constraint (SecOps — Task 27)
+//! # Restrição (SecOps — Tarefa 27)
 //! O reqwest é configurado com `use_rustls_tls()` para forçar TLS 1.3.
 //! Nenhum payload (contendo descrições de vagas) trafega sem criptografia moderna.
 
@@ -13,8 +13,8 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroize;
 
-/// System prompt rígido.
-/// Força a IA a retornar apenas SIM, NAO ou ALERTA_MANUAL — sem explicações.
+/// Prompt rígido do sistema.
+/// Força a IA a retornar apenas SIM, NAO ou ALERTA_MANUAL, sem explicações.
 const SYSTEM_PROMPT: &str =
     "Você é um classificador rigoroso. Avalie a vaga de TI. 
 Regra 1: Se for um Programa de Talentos Premium de grandes empresas (Bancos, Bolsas de Valores, Fintechs, BigTechs), retorne APENAS a palavra ALERTA_MANUAL.
@@ -24,7 +24,7 @@ Atenção: Não justifique nem cumprimente. Sua saída será mapeada diretamente
 
 const GROQ_API_URL: &str = "https://api.groq.com/openai/v1/chat/completions";
 
-// ── Serde structs (Task 26) ──────────────────────────────────────────────────
+// ── Structs Serde ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Serialize)]
 pub struct GroqRequest {
@@ -55,7 +55,7 @@ pub struct GroqResponseMessage {
     pub content: String,
 }
 
-// ── Client ───────────────────────────────────────────────────────────────────
+// ── Cliente ─────────────────────────────────────────────────────────────────
 
 pub struct GroqClient {
     client: Client,
@@ -64,7 +64,7 @@ pub struct GroqClient {
 }
 
 impl GroqClient {
-    /// Cria um novo cliente Groq com TLS 1.3 obrigatório (SecOps Task 27).
+    /// Cria um novo cliente Groq com TLS 1.3 obrigatório (SecOps Tarefa 27).
     ///
     /// `use_rustls_tls()` garante que o handshake mínimo é TLS 1.3.
     /// Se o servidor não suportar, a conexão falha — nunca degrada para TLS 1.2.
@@ -97,8 +97,8 @@ impl GroqClient {
                     content: descricao.to_string(),
                 },
             ],
-            temperature: 0.1, // temperatura muito baixa para deter alucinações de formatação
-            max_tokens: 10,   // "ALERTA_MANUAL" requer margem de tokens levemente maior
+            temperature: 0.1, // Temperatura baixa para reduzir variações de formato.
+            max_tokens: 10,   // ALERTA_MANUAL pede uma folga mínima de tokens.
         };
 
         let response = self
@@ -177,7 +177,7 @@ mod tests {
 
         let json = serde_json::to_string(&req).expect("serialização deve funcionar");
         assert!(json.contains("system"));
-        assert!(json.contains("ALERTA_MANUAL")); // Testa sub-string segura contra \n JSON do Prompt Completo
+        assert!(json.contains("ALERTA_MANUAL")); // Valida a substring sem depender de quebra de linha no JSON completo.
         assert!(json.contains("test-model"));
     }
 }
