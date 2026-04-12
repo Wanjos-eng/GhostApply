@@ -115,7 +115,7 @@ func (a *App) startup(ctx context.Context) {
 	}
 
 	if err != nil {
-		log.Printf("WAILS: Failed to open db connection: %v\n", err)
+		log.Printf("WAILS: falha ao abrir conexão com banco: %v\n", err)
 	} else {
 		// Garante as tabelas mínimas para a UI não quebrar no primeiro acesso.
 		_, initErr := database.Exec(`
@@ -157,7 +157,7 @@ func (a *App) startup(ctx context.Context) {
 			)
 		`)
 		if initErr != nil {
-			log.Printf("WAILS: Failed to init DB schema: %v\n", initErr)
+			log.Printf("WAILS: falha ao inicializar schema do banco: %v\n", initErr)
 		}
 		a.database = database
 	}
@@ -556,7 +556,7 @@ func (a *App) SaveSettings(cfg SettingsDTO) bool {
 	// Persiste no .env local.
 	err := godotenv.Write(envMap, "../.env")
 	if err != nil {
-		log.Printf("SaveSettings: Failed to write .env: %v", err)
+		log.Printf("SaveSettings: falha ao escrever .env: %v", err)
 		return false
 	}
 	return true
