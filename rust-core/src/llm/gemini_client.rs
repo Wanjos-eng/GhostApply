@@ -1,10 +1,10 @@
 //! Cliente HTTP para a API Google AI Studio (Gemini).
 //!
-//! # Intent (Tasks 31–32)
+//! # Intenção (Tarefas 31–32)
 //! Gerar um currículo personalizado em Markdown a partir da interpolação
 //! do currículo base do candidato (`meu_curriculo.md`) com a descrição da vaga.
 //!
-//! # Constraint
+//! # Restrição
 //! Toda comunicação usa TLS 1.3 (mesmo client builder do GroqClient).
 
 use anyhow::{Context, Result};
@@ -28,7 +28,7 @@ Sua tarefa:
 - Use formato Markdown estruturado com seções: Resumo, Ouro Oculto (Experiência/Projetos Críticos), Habilidades, Formação.
 - NÃO adicione saudações, despedidas ou comentários. Retorne APENAS o Markdown do currículo."#;
 
-// ── Serde structs (Task 31) ──────────────────────────────────────────────────
+// ── Structs Serde ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Serialize)]
 pub struct GeminiRequest {
@@ -65,7 +65,7 @@ pub struct GeminiResponsePart {
     pub text: String,
 }
 
-// ── Client ───────────────────────────────────────────────────────────────────
+// ── Cliente ─────────────────────────────────────────────────────────────────
 
 pub struct GeminiClient {
     client: Client,
@@ -86,7 +86,7 @@ impl GeminiClient {
 
     /// Gera um currículo adaptado interpolando currículo base + descrição da vaga.
     ///
-    /// # Intent (Task 32)
+    /// # Intenção
     /// O prompt força o Gemini a retornar APENAS Markdown — sem greetings nem
     /// comentários. O chamador pode usar `pdf::generator::extract_markdown_block`
     /// como segunda camada de limpeza.
