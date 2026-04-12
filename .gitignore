@@ -2,7 +2,9 @@
 bin/
 *.exe
 *.log
-scraper
+/scraper
+/filler
+
 
 # Go
 vendor/
@@ -34,3 +36,7 @@ Cargo.lock
 *.pem
 *.key
 *.p12
+
+# Sessão e cookies de browser
+session.json
+
