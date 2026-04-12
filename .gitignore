@@ -4,6 +4,8 @@ bin/
 *.log
 /scraper
 /filler
+/dashboard/build/bin/
+/dashboard/build/nsis/
 
 
 # Go
