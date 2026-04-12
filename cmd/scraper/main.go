@@ -41,6 +41,10 @@ func run() error {
 	dbKey  := mustEnv("DB_ENCRYPTION_KEY")
 	sessionPath := getEnv("SESSION_PATH", "session.json")
 	keywords    := getEnv("SEARCH_KEYWORDS", "golang engineer")
+	gupyBoards  := getEnv("GUPY_COMPANY_URLS", "")
+	greenhouseBoards := getEnv("GREENHOUSE_BOARDS", "")
+	leverCompanies := getEnv("LEVER_COMPANIES", "")
+	searchCountry := getEnv("SEARCH_COUNTRY", "BR")
 
 	// ── Etapa 2: abre o banco criptografado ─────────────────────────────────
 	database, err := db.Open(dbPath, dbKey)
@@ -85,12 +89,52 @@ func run() error {
 		return fmt.Errorf("run: %w", err)
 	}
 
-	// ── Etapa 6: extrai os cards de vaga ─────────────────────────────────────
-	vagas, err := ExtractVagas(page)
+	// ── Etapa 6: extrai vagas do LinkedIn ────────────────────────────────────
+	vagasLinkedIn, err := ExtractVagas(page)
 	if err != nil {
 		return fmt.Errorf("run: %w", err)
 	}
-	log.Printf("scraper: extracted %d job cards", len(vagas))
+	log.Printf("scraper: %d vagas extraídas do LinkedIn", len(vagasLinkedIn))
+
+	vagas := make([]domain.Vaga, 0, len(vagasLinkedIn)+64)
+	vagas = append(vagas, vagasLinkedIn...)
+
+	if gupyBoards != "" {
+		vagasGupy, gupyErr := ExtractGupyVagas(ctx, gupyBoards, keywords, searchCountry)
+		if gupyErr != nil {
+			log.Printf("scraper: aviso ao coletar Gupy: %v", gupyErr)
+		} else {
+			vagas = append(vagas, vagasGupy...)
+			log.Printf("scraper: %d vagas extraídas da Gupy", len(vagasGupy))
+		}
+	}
+
+	if greenhouseBoards != "" {
+		vagasGreenhouse, ghErr := FetchGreenhouseVagas(greenhouseBoards, keywords, searchCountry)
+		if ghErr != nil {
+			log.Printf("scraper: aviso ao coletar Greenhouse: %v", ghErr)
+		} else {
+			vagas = append(vagas, vagasGreenhouse...)
+			log.Printf("scraper: %d vagas extraídas da Greenhouse", len(vagasGreenhouse))
+		}
+	}
+
+	if leverCompanies != "" {
+		vagasLever, leverErr := FetchLeverVagas(leverCompanies, keywords, searchCountry)
+		if leverErr != nil {
+			log.Printf("scraper: aviso ao coletar Lever: %v", leverErr)
+		} else {
+			vagas = append(vagas, vagasLever...)
+			log.Printf("scraper: %d vagas extraídas da Lever", len(vagasLever))
+		}
+	}
+
+	log.Printf("scraper: total agregado de vagas antes da persistência: %d", len(vagas))
+	vagasDedup := dedupeVagas(vagas)
+	if len(vagasDedup) != len(vagas) {
+		log.Printf("scraper: %d vagas duplicadas removidas antes de persistir", len(vagas)-len(vagasDedup))
+	}
+	vagas = vagasDedup
 
 	// ── Etapas 7 e 8: sanitiza e persiste ───────────────────────────────────
 	saved := 0
