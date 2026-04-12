@@ -30,6 +30,10 @@ export function LoadSettings() {
   return window['go']['main']['App']['LoadSettings']();
 }
 
+export function RunPerformanceSuite() {
+  return window['go']['main']['App']['RunPerformanceSuite']();
+}
+
 export function SaveSettings(arg1) {
   return window['go']['main']['App']['SaveSettings'](arg1);
 }
