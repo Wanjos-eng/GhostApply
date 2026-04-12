@@ -21,7 +21,7 @@ func main() {
 }
 
 func run() error {
-	// Task 39: Initialize configuration
+	// Tarefa 39: inicializa a configuração.
 	_ = godotenv.Load()
 
 	dbPath := mustEnv("DATABASE_URL")
@@ -29,10 +29,10 @@ func run() error {
 	groqKey := mustEnv("GROQ_API_KEY")
 	sessionPath := getEnv("SESSION_PATH", "session.json")
 
-	// Pre-load Groq API
+	// Pré-carrega o cliente Groq com a chave da sessão.
 	groqClient := llm.NewGroqClient(groqKey)
 
-	// Step 2: Open SQLite
+	// Etapa 2: abre o SQLite criptografado.
 	database, err := db.Open(dbPath, dbKey)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
@@ -51,14 +51,14 @@ func run() error {
 
 	log.Printf("filler: found %d applications ready for submission", len(candidaturas))
 
-	// Step 3: Boot Playwright
+	// Etapa 3: inicializa o Playwright.
 	p, err := playwright.Run()
 	if err != nil {
 		return fmt.Errorf("failed to run playwright: %w", err)
 	}
 	defer p.Stop()
 
-	// Task 40: Load existing contexts with Cookies
+	// Carrega os contextos existentes com cookies antes de iniciar o loop.
 	browser, err := pw.NewBrowser(p)
 	if err != nil {
 		return fmt.Errorf("failed to start browser: %w", err)
@@ -75,9 +75,9 @@ func run() error {
 		log.Printf("filler: warning, unable to load cookies: %v", err)
 	}
 
-	// Step 4: Iterative application map
+	// Itera pelas candidaturas carregadas e executa o fluxo de automação.
 	for _, c := range candidaturas {
-		err := processApplication(ctx, database, groqClient, c)
+		err := processApplication(ctx, groqClient, c)
 		if err != nil {
 			log.Printf("filler: error processing application %s: %v", c.Candidatura.ID, err)
 			updateStatus(database, c.Candidatura.ID, domain.StatusErro)
