@@ -4,7 +4,7 @@
 // Centraliza o acesso ao banco para que nenhum outro pacote abra conexão bruta.
 // A chave de criptografia é aplicada pelo DSN antes de qualquer SQL ser executado.
 //
-// # Restrição (SecOps — Tarefa 14)
+// # Restrição (SecOps)
 // A chave fica embutida no DSN e nunca é guardada em campo de struct.
 // O chamador deve buscá-la no ambiente e descartá-la após Open.
 package db
