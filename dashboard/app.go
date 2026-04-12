@@ -284,6 +284,27 @@ func getAppEnvPath() string {
 	return filepath.Join(GetAppDir(), ".env")
 }
 
+func ensureBootstrapEnv(appEnvPath string) {
+	if _, err := os.Stat(appEnvPath); err == nil {
+		return
+	}
+
+	defaults := map[string]string{
+		"DATABASE_URL":        "forja_ghost.sqlite",
+		"SESSION_PATH":        "session.json",
+		"DATA_RETENTION_DAYS": "90",
+		"EMAIL_RETENTION_MAX": "2000",
+	}
+
+	if err := godotenv.Write(defaults, appEnvPath); err != nil {
+		log.Printf("WAILS: falha ao gerar .env padrão em %s: %v", appEnvPath, err)
+		return
+	}
+	if err := os.Chmod(appEnvPath, 0o600); err != nil {
+		log.Printf("WAILS: aviso ao aplicar permissão no .env padrão: %v", err)
+	}
+}
+
 func resolveFillerCommand() (*exec.Cmd, error) {
 	exePath, err := os.Executable()
 	if err == nil {
@@ -311,30 +332,51 @@ func resolveFillerCommand() (*exec.Cmd, error) {
 }
 
 func normalizeDatabasePath(rawPath, appDir string) string {
-	trimmed := strings.TrimSpace(rawPath)
+	trimmed := strings.Trim(strings.TrimSpace(rawPath), "\"'")
 	if trimmed == "" {
-		return filepath.Join(appDir, "forja_ghost.sqlite")
+		return filepath.Clean(filepath.Join(appDir, "forja_ghost.sqlite"))
 	}
 	if trimmed == ":memory:" {
 		return trimmed
 	}
-	if filepath.IsAbs(trimmed) {
-		return trimmed
+
+	// Compatibilidade com formatos legados como:
+	// - file:forja_ghost.sqlite?_pragma=...
+	// - file:///C:/Users/.../forja_ghost.sqlite
+	legacy := trimmed
+	if strings.HasPrefix(strings.ToLower(legacy), "file:") {
+		legacy = legacy[len("file:"):]
+		legacy = strings.TrimPrefix(legacy, "//")
 	}
-	return filepath.Join(appDir, trimmed)
+	if q := strings.Index(legacy, "?"); q >= 0 {
+		legacy = legacy[:q]
+	}
+	if strings.TrimSpace(legacy) == "" {
+		legacy = "forja_ghost.sqlite"
+	}
+
+	abs := legacy
+	if !filepath.IsAbs(abs) {
+		abs = filepath.Join(appDir, abs)
+	}
+	clean := filepath.Clean(abs)
+	if resolved, err := filepath.Abs(clean); err == nil {
+		return resolved
+	}
+	return clean
 }
 
 func openDashboardDatabase(dbPath, dbKey string) (*sql.DB, error) {
 	baseDSN := fmt.Sprintf(
-		"file:%s?_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)",
-		filepath.ToSlash(dbPath),
+		"%s?_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)",
+		dbPath,
 	)
 
 	dsnWithKey := baseDSN
 	if strings.TrimSpace(dbKey) != "" {
 		dsnWithKey = fmt.Sprintf(
-			"file:%s?_pragma=key('%s')&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)",
-			filepath.ToSlash(dbPath), dbKey,
+			"%s?_pragma=key('%s')&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)",
+			dbPath, dbKey,
 		)
 	}
 
@@ -375,6 +417,7 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	appDir := GetAppDir()
 	appEnvPath := filepath.Join(appDir, ".env")
+	ensureBootstrapEnv(appEnvPath)
 
 	// 1. Carrega configuração da pasta persistente do usuário.
 	if err := godotenv.Load(appEnvPath); err != nil {
@@ -384,9 +427,16 @@ func (a *App) startup(ctx context.Context) {
 
 	dbPath := normalizeDatabasePath(os.Getenv("DATABASE_URL"), appDir)
 	dbKey := os.Getenv("DB_ENCRYPTION_KEY")
+	_ = os.Setenv("DATABASE_URL", dbPath)
+
+	sessionPath := envOrDefault("SESSION_PATH", "session.json")
+	if !filepath.IsAbs(sessionPath) {
+		sessionPath = filepath.Join(appDir, sessionPath)
+	}
+	_ = os.Setenv("SESSION_PATH", sessionPath)
 
 	ensurePrivateFile(appEnvPath)
-	ensurePrivateFile(envOrDefault("SESSION_PATH", filepath.Join(appDir, "session.json")))
+	ensurePrivateFile(sessionPath)
 	if dbPath != ":memory:" {
 		if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
 			log.Printf("privacy: aviso ao garantir diretório do banco: %v", err)
@@ -395,6 +445,18 @@ func (a *App) startup(ctx context.Context) {
 	}
 
 	database, err := openDashboardDatabase(dbPath, dbKey)
+	if err != nil && dbPath != filepath.Join(appDir, "forja_ghost.sqlite") {
+		fallbackPath := filepath.Join(appDir, "forja_ghost.sqlite")
+		if mkErr := os.MkdirAll(filepath.Dir(fallbackPath), 0o700); mkErr != nil {
+			log.Printf("WAILS: falha ao preparar fallback do banco: %v", mkErr)
+		}
+		database, err = openDashboardDatabase(fallbackPath, dbKey)
+		if err == nil {
+			dbPath = fallbackPath
+			_ = os.Setenv("DATABASE_URL", dbPath)
+			log.Printf("WAILS: usando fallback de banco em %s", dbPath)
+		}
+	}
 
 	if err != nil {
 		log.Printf("WAILS: falha ao abrir conexão com banco: %v\n", err)
