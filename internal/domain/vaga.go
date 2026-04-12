@@ -1,5 +1,5 @@
-// Package domain contains pure business entities for GhostApply.
-// Zero external dependencies — this is the innermost Clean Arch ring.
+// Package domain contém as entidades de negócio puras do GhostApply.
+// Sem dependências externas: este é o anel mais interno da Clean Architecture.
 package domain
 
 import "time"
@@ -47,7 +47,7 @@ type Vaga struct {
 	Status    Status    `json:"status"`
 	CriadoEm  time.Time `json:"criado_em"`
 
-	// Campos opcionais para outreach (tarefa de automação)
+	// Campos opcionais para outreach no fluxo de automação.
 	RecrutadorNome   *string `json:"recrutador_nome"`
 	RecrutadorPerfil *string `json:"recrutador_perfil"`
 }
