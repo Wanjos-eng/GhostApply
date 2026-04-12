@@ -1,0 +1,26 @@
+[package]
+name    = "ghost-apply-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Segurança: limpeza zero-cost de dados sensíveis na RAM
+zeroize  = { version = "1", features = ["derive"] }
+
+# Configuração: leitura do .env com fallback a variáveis de ambiente
+dotenvy  = "0.15"
+
+# Banco criptografado: SQLite + SQLCipher (AES-256) compilado estaticamente
+rusqlite = { version = "0.31", features = ["bundled-sqlcipher"] }
+
+# Serialização / Desserialização de structs de domínio
+serde    = { version = "1", features = ["derive"] }
+
+# Tratamento de erros idiomático (sem boilerplate de From<X> para Y)
+anyhow   = "1"
+
+# HTTP client assíncrono (requisições ao LinkedIn / portais)
+reqwest  = { version = "0.12", features = ["json"] }
+
+# Runtime assíncrono
+tokio    = { version = "1", features = ["full"] }
