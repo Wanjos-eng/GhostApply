@@ -378,7 +378,21 @@ func matchesCountry(blob, country string) bool {
 	text := strings.ToLower(blob)
 	switch c {
 	case "BR", "BRAZIL", "BRASIL":
-		return strings.Contains(text, "brasil") || strings.Contains(text, "brazil") || strings.Contains(text, "remoto") || strings.Contains(text, "remote")
+		if strings.Contains(text, "brasil") || strings.Contains(text, "brazil") {
+			return true
+		}
+
+		brazilHints := []string{
+			"sao paulo", "são paulo", "rio de janeiro", "belo horizonte", "curitiba",
+			"porto alegre", "recife", "fortaleza", "campinas", "florianopolis", "florianópolis",
+		}
+		for _, hint := range brazilHints {
+			if strings.Contains(text, hint) {
+				return true
+			}
+		}
+
+		return false
 	default:
 		return true
 	}
