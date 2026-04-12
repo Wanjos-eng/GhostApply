@@ -6,6 +6,7 @@ bin/
 /filler
 /dashboard/build/bin/
 /dashboard/build/nsis/
+/dashboard/dashboard
 
 
 # Go
