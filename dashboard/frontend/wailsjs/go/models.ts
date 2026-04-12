@@ -20,6 +20,58 @@ export namespace main {
 	        this.corpo = source["corpo"];
 	    }
 	}
+	export class PerformanceSuiteDTO {
+	    ran_at: string;
+	    samples: number;
+	    database_ping_p95_ms: number;
+	    database_ping_p99_ms: number;
+	    database_ping_ms: number;
+	    fetch_history_p95_ms: number;
+	    fetch_history_p99_ms: number;
+	    fetch_history_ms: number;
+	    fetch_emails_p95_ms: number;
+	    fetch_emails_p99_ms: number;
+	    fetch_emails_ms: number;
+	    fetch_interviews_p95_ms: number;
+	    fetch_interviews_p99_ms: number;
+	    fetch_interviews_ms: number;
+	    total_suite_p95_ms: number;
+	    total_suite_p99_ms: number;
+	    history_rows: number;
+	    email_rows: number;
+	    interview_rows: number;
+	    total_suite_ms: number;
+	    database_reachable: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new PerformanceSuiteDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ran_at = source["ran_at"];
+	        this.samples = source["samples"];
+	        this.database_ping_p95_ms = source["database_ping_p95_ms"];
+	        this.database_ping_p99_ms = source["database_ping_p99_ms"];
+	        this.database_ping_ms = source["database_ping_ms"];
+	        this.fetch_history_p95_ms = source["fetch_history_p95_ms"];
+	        this.fetch_history_p99_ms = source["fetch_history_p99_ms"];
+	        this.fetch_history_ms = source["fetch_history_ms"];
+	        this.fetch_emails_p95_ms = source["fetch_emails_p95_ms"];
+	        this.fetch_emails_p99_ms = source["fetch_emails_p99_ms"];
+	        this.fetch_emails_ms = source["fetch_emails_ms"];
+	        this.fetch_interviews_p95_ms = source["fetch_interviews_p95_ms"];
+	        this.fetch_interviews_p99_ms = source["fetch_interviews_p99_ms"];
+	        this.fetch_interviews_ms = source["fetch_interviews_ms"];
+	        this.total_suite_p95_ms = source["total_suite_p95_ms"];
+	        this.total_suite_p99_ms = source["total_suite_p99_ms"];
+	        this.history_rows = source["history_rows"];
+	        this.email_rows = source["email_rows"];
+	        this.interview_rows = source["interview_rows"];
+	        this.total_suite_ms = source["total_suite_ms"];
+	        this.database_reachable = source["database_reachable"];
+	    }
+	}
 	export class ProfileDTO {
 	    target_roles: string[];
 	    core_stack: string[];
