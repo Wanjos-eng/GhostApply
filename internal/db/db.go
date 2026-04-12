@@ -1,12 +1,12 @@
-// Package db provides an encrypted SQLite connection using SQLCipher (AES-256).
+// Package db fornece uma conexão SQLite criptografada com SQLCipher (AES-256).
 //
-// # Intent
-// Centralise all database wiring so no other package ever opens a raw connection.
-// The encryption key is applied via the DSN before *any* SQL runs.
+// # Intenção
+// Centraliza o acesso ao banco para que nenhum outro pacote abra conexão bruta.
+// A chave de criptografia é aplicada pelo DSN antes de qualquer SQL ser executado.
 //
-// # Constraint (SecOps — Task 14)
-// The key is embedded in the DSN string, never stored in a struct field.
-// Callers must source it from the environment and discard it after calling Open.
+// # Restrição (SecOps — Tarefa 14)
+// A chave fica embutida no DSN e nunca é guardada em campo de struct.
+// O chamador deve buscá-la no ambiente e descartá-la após Open.
 package db
 
 import (
@@ -18,15 +18,15 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-// Open returns an AES-256 encrypted SQLite connection via SQLCipher.
+// Open retorna uma conexão SQLite criptografada com AES-256 via SQLCipher.
 //
-// The key is injected through the DSN `_pragma` mechanism so it is the very
-// first operation the driver executes — equivalent to Rust's `PRAGMA key`.
+// A chave entra pelo mecanismo `_pragma`, então vira a primeira operação
+// executada pelo driver, equivalente ao `PRAGMA key` do Rust.
 //
-// path may be ":memory:" for testing (SQLCipher accepts an empty key for in-memory DBs).
+// `path` pode ser `:memory:` em testes; SQLCipher aceita chave vazia nesse caso.
 func Open(path, key string) (*sql.DB, error) {
-	// _pragma=key encodes the SQLCipher passphrase directly in the DSN.
-	// SQLCipher applies it before any page is read or written.
+	// `_pragma=key` codifica a senha do SQLCipher diretamente no DSN.
+	// O driver aplica isso antes de qualquer leitura ou escrita.
 	dsn := fmt.Sprintf(
 		"%s?_pragma=key('%s')&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)",
 		path, key,
@@ -37,8 +37,8 @@ func Open(path, key string) (*sql.DB, error) {
 		return nil, fmt.Errorf("db.Open: failed to open '%s': %w", path, err)
 	}
 
-	// Ping forces the driver to actually open the file and apply the pragmas.
-	// Without this, errors (wrong key, corrupt file) surface only at first query.
+	// Ping força o driver a abrir o arquivo e aplicar os pragmas de fato.
+	// Sem isso, erros só apareceriam na primeira consulta.
 	if err := db.Ping(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("db.Open: failed to verify connection (wrong key?): %w", err)
