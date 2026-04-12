@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { FetchEmails, GerarDossieEstudos } from "../../wailsjs/go/main/App";
+import { FetchEmails, FetchHistory, FetchInterviews, GerarDossieEstudos } from "../../wailsjs/go/main/App";
 
 interface EmailRecrutador {
   id: string;
@@ -9,33 +9,52 @@ interface EmailRecrutador {
   corpo: string;
 }
 
+interface VagaHistoricoDTO {
+  vaga_id: string;
+  titulo: string;
+  empresa: string;
+  url: string;
+  vaga_status: string;
+  candidatura_id: string;
+  candidatura_status: string;
+  recrutador_nome: string;
+  recrutador_perfil: string;
+  criado_em: string;
+}
+
 export function DashboardView() {
   const [emails, setEmails] = useState<EmailRecrutador[]>([]);
+  const [history, setHistory] = useState<VagaHistoricoDTO[]>([]);
+  const [interviews, setInterviews] = useState<EmailRecrutador[]>([]);
   const [dossierText, setDossierText] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
-  
-  // Dashboard Metrics State (ready to receive increments from background jobs)
-  const [metrics, setMetrics] = useState({
-    sentToday: 0,
-    pdfsForged: 0,
-    detectedRemotes: 0
-  });
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fillEmails = async () => {
+    const fillData = async () => {
+      setLoading(true);
       try {
         // Only works inside Wails runtime
         if ((window as any).go) {
-           const fetched = await FetchEmails();
-           if (fetched) setEmails(fetched);
+          const [fetchedEmails, fetchedHistory, fetchedInterviews] = await Promise.all([
+            FetchEmails(),
+            FetchHistory(),
+            FetchInterviews(),
+          ]);
+
+          setEmails(fetchedEmails || []);
+          setHistory(fetchedHistory || []);
+          setInterviews(fetchedInterviews || []);
         }
       } catch (err) {
-        console.error("FetchEmails failed:", err);
+        console.error("Dashboard data refresh failed:", err);
+      } finally {
+        setLoading(false);
       }
     };
-    
-    fillEmails();
-    const intervalId = setInterval(fillEmails, 5000);
+
+    fillData();
+    const intervalId = setInterval(fillData, 10000);
     return () => clearInterval(intervalId);
   }, []);
 
@@ -54,7 +73,17 @@ export function DashboardView() {
 
   const closeDossier = () => setDossierText('');
 
-  const entrevistas = emails.filter(e => e.classificacao === "ENTREVISTA");
+  const nowDate = new Date().toISOString().slice(0, 10);
+  const sentStatuses = new Set(["ENVIADA", "APLICADA", "CONFIRMADA"]);
+  const detectedList = history.filter((v) => v.vaga_status !== "DESCARTADA" && v.vaga_status !== "REJEITADO_PRESENCIAL");
+  const forgingList = history.filter((v) => v.candidatura_status === "FORJADO");
+  const sentList = history.filter((v) => sentStatuses.has(v.candidatura_status));
+  const sentToday = sentList.filter((v) => (v.criado_em || "").slice(0, 10) === nowDate).length;
+  const metrics = {
+    sentToday,
+    pdfsForged: forgingList.length,
+    detectedRemotes: detectedList.length,
+  };
 
   return (
     <div className="p-8 space-y-8 overflow-y-auto">
@@ -78,21 +107,21 @@ export function DashboardView() {
           <p className="text-on-surface-variant text-[0.6875rem] font-medium uppercase tracking-wider mb-1">Sent Today</p>
           <div className="flex items-baseline gap-2">
             <span className="font-mono text-4xl font-bold text-on-surface">{metrics.sentToday}</span>
-            <span className="text-zinc-500 text-xs font-mono font-bold">AWAITING ENGINE</span>
+            <span className="text-zinc-500 text-xs font-mono font-bold">UPDATED 10S</span>
           </div>
         </div>
         <div className="bg-surface-container-lowest p-6 rounded shadow-[0px_4px_20px_rgba(0,0,0,0.04)]">
           <p className="text-on-surface-variant text-[0.6875rem] font-medium uppercase tracking-wider mb-1">PDFs Forged</p>
           <div className="flex items-baseline gap-2">
             <span className="font-mono text-4xl font-bold text-on-surface">{metrics.pdfsForged}</span>
-            <span className="text-zinc-400 text-xs font-mono font-bold">NONE</span>
+            <span className="text-zinc-400 text-xs font-mono font-bold">FORJADO</span>
           </div>
         </div>
         <div className="bg-surface-container-lowest p-6 rounded shadow-[0px_4px_20px_rgba(0,0,0,0.04)]">
           <p className="text-on-surface-variant text-[0.6875rem] font-medium uppercase tracking-wider mb-1">Detected Remotes</p>
           <div className="flex items-baseline gap-2">
             <span className="font-mono text-4xl font-bold text-on-surface">{metrics.detectedRemotes}</span>
-            <span className="text-zinc-400 text-xs font-mono font-bold">PENDING SCAN</span>
+            <span className="text-zinc-400 text-xs font-mono font-bold">VALID VAGAS</span>
           </div>
         </div>
       </div>
@@ -103,12 +132,20 @@ export function DashboardView() {
         <div className="space-y-4">
           <div className="flex items-center justify-between px-2">
             <h3 className="text-[0.6875rem] font-bold uppercase tracking-widest text-on-surface">Detected</h3>
-            <span className="font-mono text-[0.6875rem] text-zinc-400">0</span>
+            <span className="font-mono text-[0.6875rem] text-zinc-400">{detectedList.length}</span>
           </div>
           <div className="space-y-3">
-             <div className="p-4 text-center text-xs text-zinc-400 border border-dashed border-zinc-200 rounded-lg">
-                Nenhuma vaga identificada. Agendando scan...
-             </div>
+            {detectedList.slice(0, 8).map((v) => (
+              <a key={`${v.vaga_id}-detected`} href={v.url} target="_blank" rel="noreferrer" className="block bg-white border border-zinc-200 p-4 rounded shadow-[0px_10px_40px_rgba(0,0,0,0.02)] hover:border-zinc-400 transition">
+                <h4 className="font-headline font-semibold text-sm mb-1 line-clamp-2">{v.titulo || "Vaga"}</h4>
+                <p className="text-on-surface-variant text-xs truncate">{v.empresa || "Empresa"}</p>
+              </a>
+            ))}
+            {detectedList.length === 0 && !loading && (
+              <div className="p-4 text-center text-xs text-zinc-400 border border-dashed border-zinc-200 rounded-lg">
+                Sem vagas detectadas neste momento.
+              </div>
+            )}
           </div>
         </div>
 
@@ -116,12 +153,20 @@ export function DashboardView() {
         <div className="space-y-4">
           <div className="flex items-center justify-between px-2">
             <h3 className="text-[0.6875rem] font-bold uppercase tracking-widest text-on-surface">Forging</h3>
-            <span className="font-mono text-[0.6875rem] text-zinc-400">0</span>
+            <span className="font-mono text-[0.6875rem] text-zinc-400">{forgingList.length}</span>
           </div>
           <div className="space-y-3">
-             <div className="p-4 text-center text-xs text-zinc-400 border border-dashed border-zinc-200 rounded-lg">
-                Fila de forja vazia. Aguardando oportunidades...
-             </div>
+            {forgingList.slice(0, 8).map((v) => (
+              <a key={`${v.vaga_id}-forging`} href={v.url} target="_blank" rel="noreferrer" className="block bg-white border border-amber-200 p-4 rounded shadow-[0px_10px_40px_rgba(0,0,0,0.02)] hover:border-amber-400 transition">
+                <h4 className="font-headline font-semibold text-sm mb-1 line-clamp-2">{v.titulo || "Vaga"}</h4>
+                <p className="text-on-surface-variant text-xs truncate">{v.empresa || "Empresa"}</p>
+              </a>
+            ))}
+            {forgingList.length === 0 && !loading && (
+              <div className="p-4 text-center text-xs text-zinc-400 border border-dashed border-zinc-200 rounded-lg">
+                Nenhuma candidatura em forja agora.
+              </div>
+            )}
           </div>
         </div>
 
@@ -129,12 +174,20 @@ export function DashboardView() {
         <div className="space-y-4">
           <div className="flex items-center justify-between px-2">
             <h3 className="text-[0.6875rem] font-bold uppercase tracking-widest text-on-surface">Sent</h3>
-            <span className="font-mono text-[0.6875rem] text-zinc-400">0</span>
+            <span className="font-mono text-[0.6875rem] text-zinc-400">{sentList.length}</span>
           </div>
           <div className="space-y-3">
-             <div className="p-4 text-center text-xs text-zinc-400 border border-dashed border-zinc-200 rounded-lg">
-                Aguardando disparo de documentação...
-             </div>
+            {sentList.slice(0, 8).map((v) => (
+              <a key={`${v.vaga_id}-sent`} href={v.url} target="_blank" rel="noreferrer" className="block bg-white border border-emerald-200 p-4 rounded shadow-[0px_10px_40px_rgba(0,0,0,0.02)] hover:border-emerald-400 transition">
+                <h4 className="font-headline font-semibold text-sm mb-1 line-clamp-2">{v.titulo || "Vaga"}</h4>
+                <p className="text-on-surface-variant text-xs truncate">{v.empresa || "Empresa"}</p>
+              </a>
+            ))}
+            {sentList.length === 0 && !loading && (
+              <div className="p-4 text-center text-xs text-zinc-400 border border-dashed border-zinc-200 rounded-lg">
+                Nenhuma candidatura enviada ainda.
+              </div>
+            )}
           </div>
         </div>
 
@@ -142,18 +195,18 @@ export function DashboardView() {
         <div className="space-y-4">
           <div className="flex items-center justify-between px-2">
             <h3 className="text-[0.6875rem] font-bold uppercase tracking-widest text-on-surface">Interviews</h3>
-            <span className="font-mono text-[0.6875rem] text-zinc-400">{entrevistas.length > 0 ? entrevistas.length : '0'}</span>
+            <span className="font-mono text-[0.6875rem] text-zinc-400">{interviews.length}</span>
           </div>
           <div className="space-y-3">
             
             {/* Dynamic Real Data */}
-            {entrevistas.map((e, index) => (
-               <div key={index} className="bg-white border border-blue-200 p-4 rounded shadow-[0px_10px_40px_rgba(0,0,0,0.02)]">
+            {interviews.map((e) => (
+               <div key={e.id} className="bg-white border border-blue-200 p-4 rounded shadow-[0px_10px_40px_rgba(0,0,0,0.02)]">
                 <div className="flex flex-wrap items-center gap-2 mb-2 justify-between">
                   <span className="px-2 py-0.5 bg-blue-50 text-blue-700 text-[9px] font-bold rounded-full uppercase tracking-tighter">High Signal</span>
                   <button onClick={() => handleGerarDossie(e.corpo)} className="px-2 py-0.5 bg-zinc-900 text-white text-[9px] font-bold rounded hover:bg-zinc-700 cursor-pointer transition">Gerar Dossiê (Gemini)</button>
                 </div>
-                <h4 className="font-headline font-semibold text-sm mb-1">{e.email}</h4>
+                <h4 className="font-headline font-semibold text-sm mb-1">{e.nome || e.email}</h4>
                 <p className="text-on-surface-variant text-xs mb-3 truncate">{e.corpo}</p>
                 <div className="flex items-center gap-2 mt-4 pt-4 border-t border-zinc-50">
                   <span className="material-symbols-outlined text-[1rem] text-zinc-400">calendar_today</span>
@@ -163,9 +216,9 @@ export function DashboardView() {
             ))}
 
             {/* Default Static Template layout from user if DB has no hits yet */}
-            {entrevistas.length === 0 && (
+            {interviews.length === 0 && !loading && (
               <div className="p-4 text-center text-xs text-zinc-400 border border-dashed border-zinc-200 rounded-lg">
-                 O IMAP não detectou convites na sua caixa de entrada.
+                 Nenhum convite de entrevista encontrado no momento.
               </div>
             )}
 
