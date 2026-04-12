@@ -140,7 +140,7 @@ export function DashboardView() {
   return (
     <div className="p-8 space-y-8 overflow-y-auto">
       
-      {/* Editorial Header & Filter */}
+      {/* Cabeçalho principal e ação de performance */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
         <div>
           <h1 className="font-headline font-bold text-[3.5rem] leading-tight text-on-surface tracking-tight">GhostApply Dashboard</h1>
@@ -168,7 +168,7 @@ export function DashboardView() {
         </div>
       </div>
 
-      {/* Metrics Row */}
+      {/* Linha de métricas */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="bg-surface-container-lowest p-6 rounded shadow-[0px_4px_20px_rgba(0,0,0,0.04)]">
           <p className="text-on-surface-variant text-[0.6875rem] font-medium uppercase tracking-wider mb-1">Sent Today</p>
@@ -220,9 +220,9 @@ export function DashboardView() {
         Perf sample size: {perf ? perf.samples : '--'} runs | Last run: {perf ? perf.ran_at : '--'}
       </div>
 
-      {/* Kanban Board */}
+      {/* Board operacional */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 min-h-[600px]">
-        {/* Column: Detected */}
+        {/* Coluna: detectadas */}
         <div className="space-y-4">
           <div className="flex items-center justify-between px-2">
             <h3 className="text-[0.6875rem] font-bold uppercase tracking-widest text-on-surface">Detected</h3>
@@ -243,7 +243,7 @@ export function DashboardView() {
           </div>
         </div>
 
-        {/* Column: Forging */}
+        {/* Coluna: em forja */}
         <div className="space-y-4">
           <div className="flex items-center justify-between px-2">
             <h3 className="text-[0.6875rem] font-bold uppercase tracking-widest text-on-surface">Forging</h3>
@@ -264,7 +264,7 @@ export function DashboardView() {
           </div>
         </div>
 
-        {/* Column: Sent */}
+        {/* Coluna: enviadas */}
         <div className="space-y-4">
           <div className="flex items-center justify-between px-2">
             <h3 className="text-[0.6875rem] font-bold uppercase tracking-widest text-on-surface">Sent</h3>
@@ -285,7 +285,7 @@ export function DashboardView() {
           </div>
         </div>
 
-        {/* Column: Interviews (Dynamic DB data mixed with their layout) */}
+        {/* Coluna: entrevistas (dados reais do banco) */}
         <div className="space-y-4">
           <div className="flex items-center justify-between px-2">
             <h3 className="text-[0.6875rem] font-bold uppercase tracking-widest text-on-surface">Interviews</h3>
@@ -293,7 +293,7 @@ export function DashboardView() {
           </div>
           <div className="space-y-3">
             
-            {/* Dynamic Real Data */}
+            {/* Dados reais vindos do banco */}
             {interviews.map((e) => (
                <div key={e.id} className="bg-white border border-blue-200 p-4 rounded shadow-[0px_10px_40px_rgba(0,0,0,0.02)]">
                 <div className="flex flex-wrap items-center gap-2 mb-2 justify-between">
@@ -309,7 +309,7 @@ export function DashboardView() {
               </div>
             ))}
 
-            {/* Default Static Template layout from user if DB has no hits yet */}
+            {/* Fallback visual quando não há entrevistas */}
             {interviews.length === 0 && !loading && (
               <div className="p-4 text-center text-xs text-zinc-400 border border-dashed border-zinc-200 rounded-lg">
                  No interview invites found right now.
@@ -320,7 +320,7 @@ export function DashboardView() {
         </div>
       </div>
       
-      {/* Dossier Modal Overlay */}
+      {/* Modal de dossiê */}
       {dossierText && (
         <div className="fixed inset-0 bg-zinc-900/40 backdrop-blur-sm flex items-center justify-center z-[1000] p-4">
           <div className="bg-white w-full max-w-4xl max-h-[85vh] rounded-xl flex flex-col shadow-2xl">
