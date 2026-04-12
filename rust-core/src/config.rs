@@ -1,9 +1,9 @@
 //! Configuração da aplicação.
 //!
-//! # Intent
+//! # Intenção
 //! Carrega variáveis sensíveis do `.env` *uma única vez* na inicialização.
 //!
-//! # Constraint (SecOps — Task 04)
+//! # Restrição (SecOps — Tarefa 04)
 //! `db_encryption_key` é marcado com `Zeroize`/`ZeroizeOnDrop`: ao sair do
 //! escopo (Drop), os bytes da chave são sobrescritos com zeros na RAM,
 //! prevenindo ataques de extração de memória (cold-boot, /proc/mem dumps).
@@ -39,7 +39,7 @@ impl AppConfig {
     /// `dotenvy::dotenv()` não falha se o arquivo `.env` não existir — apenas ignora.
     /// Isso permite que ambientes de CI/CD usem variáveis de ambiente sem `.env`.
     pub fn from_env() -> Result<Self> {
-        // Carrega .env se existir; silencia erro de arquivo ausente.
+        // Carrega o .env se existir; ignora a ausência do arquivo.
         let _ = dotenvy::dotenv();
 
         let database_url = std::env::var("DATABASE_URL")
