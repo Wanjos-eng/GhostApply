@@ -21,7 +21,7 @@ func main() {
 }
 
 func run() error {
-	// Tarefa 39: inicializa a configuração.
+	// Inicializa a configuração de ambiente.
 	_ = godotenv.Load()
 
 	dbPath := mustEnv("DATABASE_URL")
@@ -35,39 +35,39 @@ func run() error {
 	// Etapa 2: abre o SQLite criptografado.
 	database, err := db.Open(dbPath, dbKey)
 	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
+		return fmt.Errorf("falha ao abrir o banco: %w", err)
 	}
 	defer database.Close()
 
 	candidaturas, err := loadForjadoTargets(database)
 	if err != nil {
-		return fmt.Errorf("failed to load candidates: %w", err)
+		return fmt.Errorf("falha ao carregar candidaturas: %w", err)
 	}
 
 	if len(candidaturas) == 0 {
-		log.Println("filler: no FORJADO applications found. Exiting.")
+		log.Println("filler: nenhuma candidatura FORJADO encontrada; encerrando")
 		return nil
 	}
 
-	log.Printf("filler: found %d applications ready for submission", len(candidaturas))
+	log.Printf("filler: %d candidaturas prontas para envio", len(candidaturas))
 
 	// Etapa 3: inicializa o Playwright.
 	p, err := playwright.Run()
 	if err != nil {
-		return fmt.Errorf("failed to run playwright: %w", err)
+		return fmt.Errorf("falha ao iniciar o playwright: %w", err)
 	}
 	defer p.Stop()
 
 	// Carrega os contextos existentes com cookies antes de iniciar o loop.
 	browser, err := pw.NewBrowser(p)
 	if err != nil {
-		return fmt.Errorf("failed to start browser: %w", err)
+		return fmt.Errorf("falha ao iniciar o navegador: %w", err)
 	}
 	defer browser.Close()
 
 	ctx, err := browser.NewContext()
 	if err != nil {
-		return fmt.Errorf("failed to create browser context: %w", err)
+		return fmt.Errorf("falha ao criar o contexto do navegador: %w", err)
 	}
 	defer ctx.Close()
 
@@ -123,7 +123,7 @@ func updateStatus(database *sql.DB, candidaturaID string, status domain.Status) 
 func mustEnv(key string) string {
 	val := os.Getenv(key)
 	if val == "" {
-		log.Fatalf("missing required env: %s", key)
+		log.Fatalf("variável de ambiente obrigatória ausente: %s", key)
 	}
 	return val
 }
