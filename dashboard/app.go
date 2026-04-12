@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/emersion/go-imap/client"
@@ -41,9 +42,32 @@ type VagaHistoricoDTO struct {
 	CriadoEm          string `json:"criado_em"`
 }
 
+type ProspectedJobDTO struct {
+	ID        string `json:"id"`
+	Titulo    string `json:"titulo"`
+	Empresa   string `json:"empresa"`
+	URL       string `json:"url"`
+	Status    string `json:"status"`
+	Fonte     string `json:"fonte"`
+	Descricao string `json:"descricao"`
+	CriadoEm  string `json:"criado_em"`
+}
+
+type ProspectedMetricsDTO struct {
+	TotalProspected int            `json:"total_prospected"`
+	PendingCount    int            `json:"pending_count"`
+	AnalyzedCount   int            `json:"analyzed_count"`
+	RejectedCount   int            `json:"rejected_count"`
+	DiscardedCount  int            `json:"discarded_count"`
+	ManualCount     int            `json:"manual_count"`
+	BySource        map[string]int `json:"by_source"`
+	BySourceLast24h map[string]int `json:"by_source_last_24h"`
+	ByStatus        map[string]int `json:"by_status"`
+}
+
 type PerformanceSuiteDTO struct {
-	RanAt             string `json:"ran_at"`
-	Samples           int    `json:"samples"`
+	RanAt             string  `json:"ran_at"`
+	Samples           int     `json:"samples"`
 	DatabasePingP95MS float64 `json:"database_ping_p95_ms"`
 	DatabasePingP99MS float64 `json:"database_ping_p99_ms"`
 	DatabasePingMS    float64 `json:"database_ping_ms"`
@@ -58,11 +82,11 @@ type PerformanceSuiteDTO struct {
 	FetchInterviewsMS float64 `json:"fetch_interviews_ms"`
 	TotalSuiteP95MS   float64 `json:"total_suite_p95_ms"`
 	TotalSuiteP99MS   float64 `json:"total_suite_p99_ms"`
-	HistoryRows       int    `json:"history_rows"`
-	EmailRows         int    `json:"email_rows"`
-	InterviewRows     int    `json:"interview_rows"`
+	HistoryRows       int     `json:"history_rows"`
+	EmailRows         int     `json:"email_rows"`
+	InterviewRows     int     `json:"interview_rows"`
 	TotalSuiteMS      float64 `json:"total_suite_ms"`
-	DatabaseReachable bool   `json:"database_reachable"`
+	DatabaseReachable bool    `json:"database_reachable"`
 }
 
 func percentileFloat64(values []float64, percentile float64) float64 {
@@ -79,6 +103,45 @@ func percentileFloat64(values []float64, percentile float64) float64 {
 		idx = len(sorted) - 1
 	}
 	return sorted[idx]
+}
+
+func inferSourceFromURL(rawURL string) string {
+	u := strings.ToLower(strings.TrimSpace(rawURL))
+	switch {
+	case strings.Contains(u, "linkedin.com"):
+		return "linkedin"
+	case strings.Contains(u, "gupy.io"):
+		return "gupy"
+	case strings.Contains(u, "greenhouse.io") || strings.Contains(u, "boards.greenhouse"):
+		return "greenhouse"
+	case strings.Contains(u, "lever.co") || strings.Contains(u, "jobs.lever"):
+		return "lever"
+	default:
+		return "other"
+	}
+}
+
+func parseCreatedAt(value string) (time.Time, bool) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return time.Time{}, false
+	}
+
+	layouts := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02 15:04:05",
+		"2006-01-02T15:04:05",
+	}
+
+	for _, layout := range layouts {
+		ts, err := time.Parse(layout, trimmed)
+		if err == nil {
+			return ts.UTC(), true
+		}
+	}
+
+	return time.Time{}, false
 }
 
 // Estrutura principal da aplicação Wails.
@@ -239,6 +302,76 @@ func (a *App) FetchHistory() []VagaHistoricoDTO {
 		}
 	}
 	return results
+}
+
+// Retorna a lista de vagas prospectadas com inferência de fonte por URL.
+func (a *App) FetchProspectedJobs() []ProspectedJobDTO {
+	if a.database == nil {
+		return nil
+	}
+
+	rows, err := a.database.Query(`
+		SELECT id, titulo, empresa, url, status, COALESCE(descricao, ''), criado_em
+		FROM Vaga_Prospectada
+		ORDER BY criado_em DESC
+		LIMIT 1500
+	`)
+	if err != nil {
+		log.Printf("FetchProspectedJobs: falha na query: %v", err)
+		return nil
+	}
+	defer rows.Close()
+
+	var results []ProspectedJobDTO
+	for rows.Next() {
+		var item ProspectedJobDTO
+		if err := rows.Scan(&item.ID, &item.Titulo, &item.Empresa, &item.URL, &item.Status, &item.Descricao, &item.CriadoEm); err != nil {
+			continue
+		}
+		item.Fonte = inferSourceFromURL(item.URL)
+		results = append(results, item)
+	}
+
+	return results
+}
+
+// Agrega métricas de prospecção para exibição no painel operacional.
+func (a *App) GetProspectedMetrics() ProspectedMetricsDTO {
+	metrics := ProspectedMetricsDTO{
+		BySource:        map[string]int{},
+		BySourceLast24h: map[string]int{},
+		ByStatus:        map[string]int{},
+	}
+
+	jobs := a.FetchProspectedJobs()
+	metrics.TotalProspected = len(jobs)
+	threshold := time.Now().UTC().Add(-24 * time.Hour)
+
+	for _, job := range jobs {
+		status := strings.ToUpper(strings.TrimSpace(job.Status))
+		source := strings.ToLower(strings.TrimSpace(job.Fonte))
+
+		metrics.BySource[source]++
+		metrics.ByStatus[status]++
+		if createdAt, ok := parseCreatedAt(job.CriadoEm); ok && (createdAt.Equal(threshold) || createdAt.After(threshold)) {
+			metrics.BySourceLast24h[source]++
+		}
+
+		switch status {
+		case "PENDENTE":
+			metrics.PendingCount++
+		case "ANALISADA", "FORJADO":
+			metrics.AnalyzedCount++
+		case "REJEITADO_PRESENCIAL":
+			metrics.RejectedCount++
+		case "DESCARTADA":
+			metrics.DiscardedCount++
+		case "ALERTA_MANUAL":
+			metrics.ManualCount++
+		}
+	}
+
+	return metrics
 }
 
 // Sincroniza a caixa de entrada e grava o resultado no banco.
@@ -706,7 +839,7 @@ func (a *App) VerifyIMAP(cfg SettingsDTO) bool {
 
 	log.Println("IMAP Verify: Dialing", addr)
 	importClient := func() bool {
-			// Mantém a lógica de conexão isolada neste helper.
+		// Mantém a lógica de conexão isolada neste helper.
 		c, err := client.DialTLS(addr, nil)
 		if err != nil {
 			log.Printf("VerifyIMAP: Dial failed: %v", err)
