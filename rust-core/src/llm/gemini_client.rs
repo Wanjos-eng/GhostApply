@@ -1,6 +1,6 @@
 //! Cliente HTTP para a API Google AI Studio (Gemini).
 //!
-//! # Intenção (Tarefas 31–32)
+//! # Intenção
 //! Gerar um currículo personalizado em Markdown a partir da interpolação
 //! do currículo base do candidato (`meu_curriculo.md`) com a descrição da vaga.
 //!
@@ -87,7 +87,7 @@ impl GeminiClient {
     /// Gera um currículo adaptado interpolando currículo base + descrição da vaga.
     ///
     /// # Intenção
-    /// O prompt força o Gemini a retornar APENAS Markdown — sem greetings nem
+    /// O prompt força o Gemini a retornar APENAS Markdown — sem saudações nem
     /// comentários. O chamador pode usar `pdf::generator::extract_markdown_block`
     /// como segunda camada de limpeza.
     pub async fn gerar_curriculo(
