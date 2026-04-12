@@ -92,6 +92,60 @@ export namespace main {
 	        this.apps_per_day = source["apps_per_day"];
 	    }
 	}
+	export class ProspectedJobDTO {
+	    id: string;
+	    titulo: string;
+	    empresa: string;
+	    url: string;
+	    status: string;
+	    fonte: string;
+	    descricao: string;
+	    criado_em: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ProspectedJobDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.titulo = source["titulo"];
+	        this.empresa = source["empresa"];
+	        this.url = source["url"];
+	        this.status = source["status"];
+	        this.fonte = source["fonte"];
+	        this.descricao = source["descricao"];
+	        this.criado_em = source["criado_em"];
+	    }
+	}
+	export class ProspectedMetricsDTO {
+	    total_prospected: number;
+	    pending_count: number;
+	    analyzed_count: number;
+	    rejected_count: number;
+	    discarded_count: number;
+	    manual_count: number;
+	    by_source: Record<string, number>;
+	    by_source_last_24h: Record<string, number>;
+	    by_status: Record<string, number>;
+	
+	    static createFrom(source: any = {}) {
+	        return new ProspectedMetricsDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.total_prospected = source["total_prospected"];
+	        this.pending_count = source["pending_count"];
+	        this.analyzed_count = source["analyzed_count"];
+	        this.rejected_count = source["rejected_count"];
+	        this.discarded_count = source["discarded_count"];
+	        this.manual_count = source["manual_count"];
+	        this.by_source = source["by_source"];
+	        this.by_source_last_24h = source["by_source_last_24h"];
+	        this.by_status = source["by_status"];
+	    }
+	}
 	export class SettingsDTO {
 	    cohere_api_key: string;
 	    groq_api_key: string;
