@@ -28,7 +28,7 @@ func processApplication(ctx playwright.BrowserContext, groqClient *llm.GroqClien
 
 	pw.HumanSleep()
 
-	// Tarefa 41: clica em Easy Apply (normalmente jobs-apply-button).
+	// Clica em Easy Apply (normalmente jobs-apply-button).
 	// Usa um locator amplo para cobrir variações de "Easy Apply" e "Apply now".
 	applyBtn := page.Locator("button:has-text('Easy Apply')").First()
 	btnCount, err := applyBtn.Count()
@@ -41,7 +41,7 @@ func processApplication(ctx playwright.BrowserContext, groqClient *llm.GroqClien
 	}
 
 	// Percorre as etapas do formulário até chegar ao envio final.
-	pageLimit := 10 // Safe guard preventing infinite loops
+	pageLimit := 10 // Limite de segurança para evitar loop infinito.
 	for i := 0; i < pageLimit; i++ {
 		pw.HumanSleep()
 
@@ -53,12 +53,12 @@ func processApplication(ctx playwright.BrowserContext, groqClient *llm.GroqClien
 
 		// Preenche os campos de texto do formulário com dados do perfil.
 		if err := fillTextInputs(page, groqClient); err != nil {
-			log.Printf("filler warning: failed mapping text inputs: %v", err)
+			log.Printf("filler: aviso ao mapear campos de texto: %v", err)
 		}
 
 		// Anexa o currículo quando o formulário expõe um campo de arquivo.
 		if err := handleFileUpload(page, c.Candidatura.CurriculoPath); err != nil {
-			log.Printf("filler warning: failed attaching file: %v", err)
+			log.Printf("filler: aviso ao anexar arquivo: %v", err)
 		}
 
 		// Avança pelas etapas intermediárias até encontrar a ação final.
@@ -75,11 +75,11 @@ func processApplication(ctx playwright.BrowserContext, groqClient *llm.GroqClien
 			break
 		} else if ok, _ := reviewBtn.IsVisible(); ok {
 			if err := reviewBtn.Click(); err != nil {
-				log.Printf("filler warn: failed to click review")
+				log.Printf("filler: aviso ao clicar em review")
 			}
 		} else if ok, _ := nextBtn.IsVisible(); ok {
 			if err := nextBtn.Click(); err != nil {
-				log.Printf("filler warn: failed to click next")
+				log.Printf("filler: aviso ao clicar em next")
 			}
 		} else {
 			// Sem botões padrão, a tela provavelmente está em um estado intermediário incomum.
@@ -88,7 +88,7 @@ func processApplication(ctx playwright.BrowserContext, groqClient *llm.GroqClien
 	}
 
 	pw.HumanSleep()
-	
+
 	// Confirma que a tela final de sucesso realmente apareceu.
 	successText := page.Locator("text='Application sent'")
 	if cnt, _ := successText.Count(); cnt == 0 {
@@ -108,7 +108,7 @@ func fillTextInputs(page playwright.Page, groqClient *llm.GroqClient) error {
 
 	for i := 0; i < count; i++ {
 		inputLoc := inputs.Nth(i)
-		
+
 		// Ignora campos que já vieram preenchidos pela página.
 		val, _ := inputLoc.InputValue()
 		if val != "" {
@@ -138,7 +138,7 @@ func fillTextInputs(page playwright.Page, groqClient *llm.GroqClient) error {
 		if answer != "" {
 			// Digita com atraso humano para reduzir detecção de automação.
 			if err := pw.TypeHumanly(inputLoc, answer); err != nil {
-				log.Printf("TypeHumanly error: %v", err)
+				log.Printf("filler: erro no TypeHumanly: %v", err)
 			}
 		}
 	}
@@ -149,7 +149,7 @@ func handleFileUpload(page playwright.Page, resumePath string) error {
 	// Localiza o campo de upload quando ele estiver visível.
 	fileInput := page.Locator("input[type='file']").First()
 	isVis, _ := fileInput.IsVisible()
-	
+
 	// O elemento pode estar oculto; por isso o arquivo é anexado diretamente.
 	count, _ := fileInput.Count()
 	if count > 0 && isVis {
@@ -157,28 +157,28 @@ func handleFileUpload(page playwright.Page, resumePath string) error {
 		if err != nil {
 			return err
 		}
-		log.Printf("Resume successfully loaded: %s", resumePath)
+		log.Printf("filler: currículo anexado com sucesso: %s", resumePath)
 	}
 	return nil
 }
 
 func getAnswerForLabel(label string, groqClient *llm.GroqClient) string {
 	lowerLabel := strings.ToLower(label)
-	
-	// Base standard deterministic resolution
+
+	// Regras determinísticas para campos frequentes.
 	if match, _ := regexp.MatchString(`.*(phone|telefone|celular).*`, lowerLabel); match {
 		return getEnv("USER_PHONE", "+551199999999")
 	}
 	if match, _ := regexp.MatchString(`.*(city|cidade|reside).*`, lowerLabel); match {
 		return getEnv("USER_CITY", "São Paulo")
 	}
-	
+
 	// Para campos complexos, delega a resposta ao Groq.
-	profileContext := getEnv("USER_PROFILE_CONTEXT", "Backend developer experienced in Go, Rust, React. Lives in Brazil.")
-	
+	profileContext := getEnv("USER_PROFILE_CONTEXT", "Desenvolvedor backend com experiência em Go, Rust e React. Atua no Brasil.")
+
 	ans, err := groqClient.AnswerFormField(label, profileContext)
 	if err != nil {
-		log.Printf("groq warn: failed to answer question '%s': %v", label, err)
+		log.Printf("filler: aviso no Groq ao responder '%s': %v", label, err)
 		return ""
 	}
 	return ans
