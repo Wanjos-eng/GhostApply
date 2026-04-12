@@ -8,9 +8,13 @@ export function FetchHistory():Promise<Array<main.VagaHistoricoDTO>>;
 
 export function FetchInterviews():Promise<Array<main.EmailRecrutador>>;
 
+export function FetchProspectedJobs():Promise<Array<main.ProspectedJobDTO>>;
+
 export function GenerateOutreachMessage(arg1:string,arg2:string):Promise<string>;
 
 export function GerarDossieEstudos(arg1:string):Promise<string>;
+
+export function GetProspectedMetrics():Promise<main.ProspectedMetricsDTO>;
 
 export function GetSystemStatus():Promise<Record<string, any>>;
 
