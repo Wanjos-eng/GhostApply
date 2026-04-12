@@ -1,10 +1,10 @@
 //! Cliente HTTP para a API do Groq (LLM rápido para triagem).
 //!
-//! # Intenção (Tarefas 26–28)
+//! # Intenção
 //! Classificar se uma vaga é exclusivamente remota usando um system prompt
 //! rígido que força resposta SIM/NAO. Funciona como primeiro filtro do pipeline.
 //!
-//! # Restrição (SecOps — Tarefa 27)
+//! # Restrição (SecOps)
 //! O reqwest é configurado com `use_rustls_tls()` para forçar TLS 1.3.
 //! Nenhum payload (contendo descrições de vagas) trafega sem criptografia moderna.
 
@@ -64,7 +64,7 @@ pub struct GroqClient {
 }
 
 impl GroqClient {
-    /// Cria um novo cliente Groq com TLS 1.3 obrigatório (SecOps Tarefa 27).
+    /// Cria um novo cliente Groq com TLS 1.3 obrigatório.
     ///
     /// `use_rustls_tls()` garante que o handshake mínimo é TLS 1.3.
     /// Se o servidor não suportar, a conexão falha — nunca degrada para TLS 1.2.
