@@ -42,7 +42,7 @@ func TestClean_RemovesURLs(t *testing.T) {
 }
 
 func TestClean_ReturnsErrorForEmptyResult(t *testing.T) {
-	// Input with only HTML tags and scripts — results in empty string after clean
+	// Entrada só com tags HTML e scripts: após limpeza deve ficar vazia.
 	raw := `<script>evil()</script><style>.x{}</style>`
 	_, err := parser.Clean(raw)
 	if !errors.Is(err, parser.ErrEmptyResult) {
