@@ -9,7 +9,6 @@ package main
 import (
 	"fmt"
 	"net/url"
-	"sync"
 
 	"github.com/Wanjos-eng/GhostApply/internal/domain"
 	"github.com/playwright-community/playwright-go"
