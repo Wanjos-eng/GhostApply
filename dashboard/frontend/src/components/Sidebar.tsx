@@ -57,18 +57,9 @@ export function Sidebar({ activeScreen, setActiveScreen }: SidebarProps) {
           <span className="material-symbols-outlined text-[1.25rem]">dashboard</span>
           Dashboard
         </button>
-        <button
-          onClick={() => setActiveScreen('history')}
-          className={`w-full flex items-center px-4 py-3 mb-2 rounded-xl border transition-all duration-300 shadow-sm
-            ${activeScreen === 'history' 
-              ? 'bg-[#1a1c1c] text-white border-transparent shadow-md translate-x-1' 
-              : 'bg-white text-gray-500 border-gray-100 hover:border-gray-300 hover:text-[#1a1c1c]'
-            }`}
-        >
-          <svg className="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <span className="font-semibold text-sm tracking-wide">Histórico</span>
+        <button onClick={() => setActiveScreen('history')} className={`w-full text-left ${getNavClass('history')}`}>
+          <span className="material-symbols-outlined text-[1.25rem]">history</span>
+          Histórico
         </button>
         <button onClick={() => setActiveScreen('profile')} className={`w-full text-left ${getNavClass('profile')}`}>
           <span className="material-symbols-outlined text-[1.25rem]">account_circle</span>
