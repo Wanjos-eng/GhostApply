@@ -14,7 +14,7 @@ export function Settings() {
   const [imapTest, setImapTest] = useState("");
 
   useEffect(() => {
-    // Only works inside Wails runtime
+    // Funciona apenas dentro do runtime do Wails.
     if ((window as any).go) {
       LoadSettings().then(data => {
         if (data) setCfg(data);
@@ -33,14 +33,14 @@ export function Settings() {
   };
 
   const handleTestImap = async () => {
-    setImapTest("Conectando...");
+    setImapTest("Connecting...");
     try {
       if ((window as any).go) {
         const result = await VerifyIMAP(cfg);
-        setImapTest(result ? "✅ Conexão IMAP Bem Sucedida" : "❌ Falha na conexão ou Login");
+        setImapTest(result ? "✅ IMAP connection successful" : "❌ Connection or login failed");
       }
     } catch {
-      setImapTest("❌ Erro fatal");
+      setImapTest("❌ Fatal error");
     }
   };
 
@@ -48,7 +48,7 @@ export function Settings() {
     <div className="p-8 space-y-8 overflow-y-auto w-full">
       <div className="flex flex-col gap-2">
         <h1 className="font-headline font-bold text-[3.5rem] leading-tight text-on-surface tracking-tight">System Settings</h1>
-        <p className="text-on-surface-variant max-w-xl">Crucial GhostApply API Keys and IMAP Configurations.</p>
+        <p className="text-on-surface-variant max-w-xl">Core GhostApply API keys and IMAP configuration.</p>
       </div>
 
       <form onSubmit={handleSave} className="bg-white p-8 rounded shadow-[0px_4px_20px_rgba(0,0,0,0.04)] space-y-6">
@@ -59,15 +59,15 @@ export function Settings() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-1">
               <label className="text-xs font-semibold text-zinc-600">Gemini API Key</label>
-              <input type="password" value={cfg.gemini_api_key} onChange={e => setCfg({...cfg, gemini_api_key: e.target.value})} className="w-full text-sm p-3 bg-surface-container-low border border-outline-variant/30 rounded focus:ring-primary focus:border-primary" placeholder="AI Studio Key..." />
+              <input type="password" value={cfg.gemini_api_key} onChange={e => setCfg({...cfg, gemini_api_key: e.target.value})} className="w-full text-sm p-3 bg-surface-container-low border border-outline-variant/30 rounded focus:ring-primary focus:border-primary" placeholder="AI Studio key..." />
             </div>
             <div className="space-y-1">
               <label className="text-xs font-semibold text-zinc-600">Cohere API Key</label>
-              <input type="password" value={cfg.cohere_api_key} onChange={e => setCfg({...cfg, cohere_api_key: e.target.value})} className="w-full text-sm p-3 bg-surface-container-low border border-outline-variant/30 rounded focus:ring-primary focus:border-primary" placeholder="Cohere Key..." />
+              <input type="password" value={cfg.cohere_api_key} onChange={e => setCfg({...cfg, cohere_api_key: e.target.value})} className="w-full text-sm p-3 bg-surface-container-low border border-outline-variant/30 rounded focus:ring-primary focus:border-primary" placeholder="Cohere key..." />
             </div>
             <div className="space-y-1">
               <label className="text-xs font-semibold text-zinc-600">Groq API Key</label>
-              <input type="password" value={cfg.groq_api_key} onChange={e => setCfg({...cfg, groq_api_key: e.target.value})} className="w-full text-sm p-3 bg-surface-container-low border border-outline-variant/30 rounded focus:ring-primary focus:border-primary" placeholder="Groq Key..." />
+              <input type="password" value={cfg.groq_api_key} onChange={e => setCfg({...cfg, groq_api_key: e.target.value})} className="w-full text-sm p-3 bg-surface-container-low border border-outline-variant/30 rounded focus:ring-primary focus:border-primary" placeholder="Groq key..." />
             </div>
           </div>
         </div>
@@ -78,7 +78,7 @@ export function Settings() {
              <h2 className="text-sm font-bold uppercase tracking-widest text-on-surface-variant">IMAP Listener (Recruiter Extraction)</h2>
              <div className="flex items-center gap-4">
                 <span className="text-xs font-semibold text-zinc-500">{imapTest}</span>
-                <button type="button" onClick={handleTestImap} className="px-3 py-1 bg-surface-container-high hover:bg-surface-dim text-xs font-semibold rounded transition text-blue-800 border border-blue-200">Test Connection</button>
+               <button type="button" onClick={handleTestImap} className="px-3 py-1 bg-surface-container-high hover:bg-surface-dim text-xs font-semibold rounded transition text-blue-800 border border-blue-200">Test Connection</button>
              </div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
