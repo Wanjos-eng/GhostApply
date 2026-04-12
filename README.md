@@ -16,33 +16,48 @@ Interface desktop e ponte entre frontend/backend são feitas por Wails.
 
 Download da release atual:
 
-- https://github.com/Wanjos-eng/GhostApply/releases/tag/v1.0.0
+- https://github.com/Wanjos-eng/GhostApply/releases/tag/v1.0.1
 
 Arquivos disponíveis na release:
 
-- GhostApply-linux-amd64
-- GhostApply-windows-amd64.exe
+- GhostApply-linux-amd64-bundle.zip
+- GhostApply-windows-amd64-bundle.zip
+- GhostApply-amd64-installer.exe
 
-## Como Usar os Binários
+## Como Usar (Instalar e Rodar)
+
+### Recomendado: Bundles ZIP (com filler incluso)
+
+1. Baixe um dos bundles na release:
+	- GhostApply-linux-amd64-bundle.zip
+	- GhostApply-windows-amd64-bundle.zip
+2. Extraia o zip.
+3. Execute o app mantendo o arquivo `filler`/`filler.exe` na mesma pasta do executável principal.
+
+### Windows (instalador NSIS)
+
+1. Baixe `GhostApply-amd64-installer.exe`.
+2. Instale normalmente.
+3. Abra o app pelo atalho criado no menu iniciar ou desktop.
 
 ### Linux (amd64)
 
-1. Baixe o arquivo GhostApply-linux-amd64 na página de release.
+1. Baixe e extraia `GhostApply-linux-amd64-bundle.zip`.
 2. Torne o binário executável:
 
 ```bash
-chmod +x GhostApply-linux-amd64
+chmod +x GhostApply filler
 ```
 
 3. Execute o app:
 
 ```bash
-./GhostApply-linux-amd64
+./GhostApply
 ```
 
 ### Windows (amd64)
 
-1. Baixe o arquivo GhostApply-windows-amd64.exe na página de release.
+1. Baixe e extraia `GhostApply-windows-amd64-bundle.zip`.
 2. Dê duplo clique para executar.
 3. Se o SmartScreen alertar, clique em Mais Informações e depois em Executar assim mesmo.
 
