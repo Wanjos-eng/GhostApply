@@ -1,16 +1,16 @@
-// Package parser provides text sanitisation utilities for raw HTML scraped from job portals.
+// Package parser fornece utilitários de sanitização de texto para HTML bruto coletado de portais.
 //
-// # Intent
-// Raw job descriptions come with HTML tags, tracking pixels, embedded scripts and
-// sometimes adversarial content designed to manipulate LLMs (prompt injection).
-// This package aggressively strips everything that is not plain human-readable text.
+// # Intenção
+// Descrições de vaga vêm com tags HTML, rastreadores, scripts embutidos e
+// às vezes conteúdo adversarial para manipular LLMs (prompt injection).
+// Este pacote remove agressivamente tudo que não seja texto legível.
 //
-// # Constraint (SecOps — Task 24)
-// ALL of these must be removed before the text reaches the AI pipeline:
-//   - <script> and <style> blocks (code execution vectors)
-//   - Email addresses (PII leakage + prompt injection bait)
-//   - Hyperlinks and bare URLs (redirect/phishing vectors)
-//   - Residual HTML tags
+// # Restrição (SecOps — Tarefa 24)
+// Tudo isso precisa sair antes do texto entrar no pipeline de IA:
+//   - blocos <script> e <style> (vetores de execução de código)
+//   - endereços de email (vazamento de PII e isca de prompt injection)
+//   - links e URLs soltas (redirecionamento e phishing)
+//   - tags HTML residuais
 package parser
 
 import (
@@ -19,39 +19,39 @@ import (
 	"strings"
 )
 
-// ── compiled regexes (package-level = compiled once) ─────────────────────────
+// ── regex compiladas (nível de pacote = compiladas uma vez) ─────────────────
 
 var (
-	// Removes <script>...</script> blocks including multiline content.
+	// Remove blocos <script>...</script>, inclusive conteúdo multilinha.
 	reScript = regexp.MustCompile(`(?is)<script[^>]*>.*?</script>`)
 
-	// Removes <style>...</style> blocks.
+	// Remove blocos <style>...</style>.
 	reStyle = regexp.MustCompile(`(?is)<style[^>]*>.*?</style>`)
 
-	// Removes all remaining HTML tags.
+	// Remove todas as tags HTML restantes.
 	reHTMLTag = regexp.MustCompile(`<[^>]+>`)
 
-	// Removes email addresses — PII and common prompt injection anchor.
+	// Remove emails, que são PII e ponto comum de prompt injection.
 	reEmail = regexp.MustCompile(`[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}`)
 
-	// Removes URLs (http/https/ftp and bare www. links).
+	// Remove URLs (http/https/ftp e links com www.).
 	reURL = regexp.MustCompile(`(?i)(https?://|ftp://|www\.)\S+`)
 
-	// Collapses multiple whitespace characters (including newlines) into a single space.
+	// Colapsa múltiplos espaços em um único espaço.
 	reWhitespace = regexp.MustCompile(`\s+`)
 )
 
-// ErrEmptyResult is returned when sanitisation leaves no readable text.
-// Callers must treat this as a signal to discard the job description entirely.
+// ErrEmptyResult é retornado quando a sanitização não deixa texto legível.
+// O chamador deve tratar isso como sinal para descartar a descrição.
 var ErrEmptyResult = errors.New("parser: sanitised text is empty — raw input had no usable content")
 
-// Clean sanitises raw HTML from a job portal, returning plain text safe for AI consumption.
+// Clean sanitiza HTML bruto de um portal de vagas e devolve texto puro seguro para a IA.
 //
-// Removal order matters:
-//  1. Script/style blocks first (may contain URLs/emails that would confuse later steps)
-//  2. All HTML tags
-//  3. Emails and URLs
-//  4. Whitespace normalisation
+// A ordem de remoção importa:
+//  1. blocos de script/style primeiro, porque podem conter URLs/emails
+//  2. todas as tags HTML
+//  3. emails e URLs
+//  4. normalização de espaços em branco
 func Clean(raw string) (string, error) {
 	s := raw
 	s = reScript.ReplaceAllString(s, " ")
