@@ -13,8 +13,8 @@ import (
 	"database/sql"
 	"fmt"
 
-	// CGO driver — requires CGO_ENABLED=1 and libsqlcipher-dev at build time.
-	// The blank import registers the "sqlite3" driver with database/sql.
+	// Driver CGO: exige CGO_ENABLED=1 e libsqlcipher-dev no ambiente de build.
+	// O import em branco registra o driver "sqlite3" no database/sql.
 	_ "github.com/mattn/go-sqlite3"
 )
 
