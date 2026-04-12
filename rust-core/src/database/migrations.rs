@@ -18,6 +18,12 @@ use rusqlite::Connection;
 pub fn run_migrations(conn: &Connection) -> Result<()> {
     conn.execute_batch(SCHEMA_SQL)
         .context("falha ao executar migrations — schema inválido ou banco corrompido")?;
+        
+    // Injeção de dependência reversa: adiciona colunas novas sem dropar o banco local.
+    // Ignoramos erros do tipo 'duplicate column name' para manter a idempotência se já rodou.
+    let _ = conn.execute("ALTER TABLE Vaga_Prospectada ADD COLUMN recrutador_nome TEXT", []);
+    let _ = conn.execute("ALTER TABLE Vaga_Prospectada ADD COLUMN recrutador_perfil TEXT", []);
+
     Ok(())
 }
 
@@ -31,6 +37,7 @@ const SCHEMA_SQL: &str = "
 -- `status` controla o ciclo de vida completo do pipeline:
 --   NOVA → PENDENTE → ANALISADA → DESCARTADA
 --                   → REJEITADO_PRESENCIAL (Groq: não é remoto)
+--                   → ALERTA_MANUAL (Groq: detectou programa talent premium)
 --                   → FORJADO (Gemini gerou CV)
 CREATE TABLE IF NOT EXISTS Vaga_Prospectada (
     id        TEXT PRIMARY KEY NOT NULL,
@@ -40,7 +47,7 @@ CREATE TABLE IF NOT EXISTS Vaga_Prospectada (
     descricao TEXT,
     status    TEXT NOT NULL DEFAULT 'NOVA'
                   CHECK (status IN (
-                      'NOVA', 'PENDENTE', 'ANALISADA',
+                      'NOVA', 'PENDENTE', 'ANALISADA', 'ALERTA_MANUAL',
                       'REJEITADO_PRESENCIAL', 'FORJADO', 'DESCARTADA'
                   )),
     criado_em TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
