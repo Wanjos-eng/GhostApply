@@ -12,6 +12,48 @@ O projeto combina 3 stacks no mesmo produto:
 
 Interface desktop e ponte entre frontend/backend são feitas por Wails.
 
+## Release Oficial
+
+Download da release atual:
+
+- https://github.com/Wanjos-eng/GhostApply/releases/tag/v1.0.0
+
+Arquivos disponíveis na release:
+
+- GhostApply-linux-amd64
+- GhostApply-windows-amd64.exe
+
+## Como Usar os Binários
+
+### Linux (amd64)
+
+1. Baixe o arquivo GhostApply-linux-amd64 na página de release.
+2. Torne o binário executável:
+
+```bash
+chmod +x GhostApply-linux-amd64
+```
+
+3. Execute o app:
+
+```bash
+./GhostApply-linux-amd64
+```
+
+### Windows (amd64)
+
+1. Baixe o arquivo GhostApply-windows-amd64.exe na página de release.
+2. Dê duplo clique para executar.
+3. Se o SmartScreen alertar, clique em Mais Informações e depois em Executar assim mesmo.
+
+### Configuração Inicial Recomendada
+
+Ao abrir o app pela primeira vez:
+
+1. Preencha as credenciais na tela Settings (LLM e IMAP).
+2. Teste a conexão IMAP no botão Test Connection.
+3. Rode o scraper para popular vagas e depois o fluxo de candidatura.
+
 ## Arquitetura do Repositório
 
 Estrutura de alto nível:
