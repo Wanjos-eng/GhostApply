@@ -108,11 +108,28 @@ func extractSingleCard(page playwright.Page, card playwright.Locator) (domain.Va
 		descricao = "" // description is optional; continue without it
 	}
 
+	// Task Outreach: Extrai dados do recrutador se disponível no painel de detalhes
+	var recrutadorNome, recrutadorPerfil *string
+	hiringTeamEl := page.Locator(".hirer-card__hirer-information").First()
+	if count, _ := hiringTeamEl.Count(); count > 0 {
+		nameEl := hiringTeamEl.Locator("strong, .text-heading-small").First()
+		if text, err := nameEl.InnerText(); err == nil && text != "" {
+			recrutadorNome = &text
+		}
+		
+		linkEl := hiringTeamEl.Locator("a").First()
+		if href, err := linkEl.GetAttribute("href"); err == nil && href != "" {
+			recrutadorPerfil = &href
+		}
+	}
+
 	return domain.Vaga{
-		Titulo:    titulo,
-		Empresa:   empresa,
-		URL:       jobURL,
-		Descricao: descricao,
-		Status:    domain.StatusPendente,
+		Titulo:           titulo,
+		Empresa:          empresa,
+		URL:              jobURL,
+		Descricao:        descricao,
+		Status:           domain.StatusPendente,
+		RecrutadorNome:   recrutadorNome,
+		RecrutadorPerfil: recrutadorPerfil,
 	}, nil
 }

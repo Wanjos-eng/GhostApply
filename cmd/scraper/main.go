@@ -123,9 +123,9 @@ func run() error {
 // Task 25: status is set to PENDENTE for downstream AI processing.
 func insertVaga(database *sql.DB, v domain.Vaga) error {
 	_, err := database.Exec(
-		`INSERT OR IGNORE INTO Vaga_Prospectada (id, titulo, empresa, url, descricao, status)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		v.ID, v.Titulo, v.Empresa, v.URL, v.Descricao, string(domain.StatusPendente),
+		`INSERT OR IGNORE INTO Vaga_Prospectada (id, titulo, empresa, url, descricao, status, recrutador_nome, recrutador_perfil)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		v.ID, v.Titulo, v.Empresa, v.URL, v.Descricao, string(domain.StatusPendente), v.RecrutadorNome, v.RecrutadorPerfil,
 	)
 	if err != nil {
 		return fmt.Errorf("insertVaga: %w", err)
