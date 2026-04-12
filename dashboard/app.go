@@ -9,6 +9,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
+	"time"
 
 	"github.com/emersion/go-imap/client"
 	"github.com/joho/godotenv"
@@ -56,7 +58,7 @@ func (a *App) startup(ctx context.Context) {
 
 	dbPath := os.Getenv("DATABASE_URL")
 	dbKey := os.Getenv("DB_ENCRYPTION_KEY")
-	
+
 	if dbPath == "" {
 		dbPath = "../forja_ghost.sqlite"
 	}
@@ -74,8 +76,37 @@ func (a *App) startup(ctx context.Context) {
 	if err != nil {
 		log.Printf("WAILS: Failed to open db connection: %v\n", err)
 	} else {
-		// Initialize missing tables dynamically to prevent UI polling crash 
+		// Initialize missing tables dynamically to prevent UI polling crash
 		_, initErr := database.Exec(`
+			CREATE TABLE IF NOT EXISTS Vaga_Prospectada (
+				id TEXT PRIMARY KEY NOT NULL,
+				titulo TEXT NOT NULL,
+				empresa TEXT NOT NULL,
+				url TEXT NOT NULL UNIQUE,
+				descricao TEXT,
+				status TEXT NOT NULL DEFAULT 'NOVA'
+					CHECK (status IN (
+						'NOVA', 'PENDENTE', 'ANALISADA', 'ALERTA_MANUAL',
+						'REJEITADO_PRESENCIAL', 'FORJADO', 'DESCARTADA'
+					)),
+				recrutador_nome TEXT,
+				recrutador_perfil TEXT,
+				criado_em TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+			);
+			CREATE TABLE IF NOT EXISTS Candidatura_Forjada (
+				id TEXT PRIMARY KEY NOT NULL,
+				vaga_id TEXT NOT NULL
+					REFERENCES Vaga_Prospectada(id) ON DELETE CASCADE,
+				curriculo_path TEXT,
+				carta_path TEXT,
+				status TEXT NOT NULL DEFAULT 'RASCUNHO'
+					CHECK (status IN (
+						'RASCUNHO', 'FORJADO', 'ENVIADA',
+						'APLICADA', 'CONFIRMADA', 'REJEITADA', 'ERRO'
+					)),
+				enviado_em TEXT,
+				criado_em TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+			);
 			CREATE TABLE IF NOT EXISTS Email_Recrutador (
 				id TEXT PRIMARY KEY,
 				email TEXT,
@@ -169,20 +200,20 @@ func (a *App) FetchHistory() []VagaHistoricoDTO {
 	return results
 }
 
-// SyncEmailsRoutine hooks into imap_listener.go and cohere.go 
+// SyncEmailsRoutine hooks into imap_listener.go and cohere.go
 func (a *App) SyncEmailsRoutine() {
 	if a.database == nil {
 		return
 	}
-	
+
 	imapClient, err := NewIMAPListener()
 	if err != nil {
 		log.Printf("SyncEmails: Failed IMAP: %v\n", err)
 		return
 	}
-	
+
 	cohere := NewCohereClient()
-	
+
 	unseenMap, err := imapClient.FetchUnseenEmailBodies()
 	if err != nil {
 		log.Printf("SyncEmails: Failed parsing unseen: %v\n", err)
@@ -195,12 +226,12 @@ func (a *App) SyncEmailsRoutine() {
 			classificacao = "OUTRO"
 			log.Printf("SyncEmails: Cohere failure: %v\n", err)
 		}
-		
+
 		// Map mock logic persistence inside Email_Recrutador table
 		pseudoUUID := fmt.Sprintf("email-%d", seqId)
 		_, execErr := a.database.Exec("INSERT INTO Email_Recrutador (id, email, classificacao, corpo) VALUES (?, ?, ?, ?)",
 			pseudoUUID, "recruiter@example.com", classificacao, body)
-			
+
 		if execErr == nil {
 			imapClient.MarkAsSeen(seqId)
 			log.Printf("SyncEmails: Appended message [%s]", classificacao)
@@ -287,6 +318,86 @@ Conteúdo do Email de Entrevista:
 	return "Falha inesperada ao gerar dossiê."
 }
 
+// GetSystemStatus checks AI and email connection health
+func (a *App) GetSystemStatus() map[string]interface{} {
+	status := map[string]interface{}{
+		"database": "✓ OK",
+		"cohere":   "✗ OFFLINE",
+		"groq":     "✗ OFFLINE",
+		"gemini":   "✗ OFFLINE",
+		"imap":     "✗ OFFLINE",
+	}
+
+	// Check database
+	if a.database != nil {
+		if err := a.database.Ping(); err != nil {
+			status["database"] = "✗ ERRO"
+		}
+	} else {
+		status["database"] = "✗ ERRO"
+	}
+
+	// Check Cohere API
+	cohere := NewCohereClient()
+	if cohere.apiKey != "" {
+		// Try a simple health check by testing the API
+		resp, err := http.Post(
+			"https://api.cohere.ai/v1/health",
+			"application/json",
+			bytes.NewBufferString(`{}`),
+		)
+		if err == nil && (resp.StatusCode == 200 || resp.StatusCode == 404) {
+			status["cohere"] = "✓ OK"
+			resp.Body.Close()
+		} else {
+			if resp != nil {
+				resp.Body.Close()
+			}
+		}
+	}
+
+	// Check Groq API (basic connectivity)
+	groqKey := os.Getenv("GROQ_API_KEY")
+	if groqKey != "" {
+		req, err := http.NewRequest("GET", "https://api.groq.com/", nil)
+		if err == nil {
+			client := &http.Client{Timeout: 5 * time.Second}
+			resp, err := client.Do(req)
+			if err == nil {
+				status["groq"] = "✓ OK"
+				resp.Body.Close()
+			}
+		}
+	}
+
+	// Check Gemini API
+	geminiKey := os.Getenv("GEMINI_API_KEY")
+	if geminiKey != "" {
+		url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=%s", geminiKey)
+		req, err := http.NewRequest("POST", url, bytes.NewBufferString(`{"contents":[]}`))
+		if err == nil {
+			req.Header.Set("Content-Type", "application/json")
+			client := &http.Client{Timeout: 5 * time.Second}
+			resp, err := client.Do(req)
+			if err == nil {
+				status["gemini"] = "✓ OK"
+				resp.Body.Close()
+			}
+		}
+	}
+
+	// Check IMAP
+	imapServer := os.Getenv("IMAP_SERVER")
+	if imapServer != "" {
+		_, err := NewIMAPListener()
+		if err == nil {
+			status["imap"] = "✓ OK"
+		}
+	}
+
+	return status
+}
+
 // ----------------------------------------------------
 // Settings & Config Structs for UI Bindings
 // ----------------------------------------------------
@@ -301,11 +412,11 @@ type SettingsDTO struct {
 }
 
 type ProfileDTO struct {
-	TargetRoles     []string `json:"target_roles"`
-	CoreStack       []string `json:"core_stack"`
-	StrictlyRemote  bool     `json:"strictly_remote"`
-	MinSalaryFloor  string   `json:"min_salary_floor"`
-	AppsPerDay      int      `json:"apps_per_day"`
+	TargetRoles    []string `json:"target_roles"`
+	CoreStack      []string `json:"core_stack"`
+	StrictlyRemote bool     `json:"strictly_remote"`
+	MinSalaryFloor string   `json:"min_salary_floor"`
+	AppsPerDay     int      `json:"apps_per_day"`
 }
 
 // LoadSettings reads the local .env mapping into the frontend Settings UI
@@ -425,32 +536,56 @@ CV Text:
 	if len(result.Candidates) > 0 && len(result.Candidates[0].Content.Parts) > 0 {
 		geminiJSON := result.Candidates[0].Content.Parts[0].Text
 		geminiJSON = string(bytes.TrimSpace([]byte(geminiJSON)))
-		
+
 		log.Println("Gemini Extracted JSON:", geminiJSON)
 		var parsed ProfileDTO
 		// Fill defaults
 		parsed.StrictlyRemote = true
 		parsed.MinSalaryFloor = "$120,000"
 		parsed.AppsPerDay = 50
-		
+
 		if err := json.Unmarshal([]byte(geminiJSON), &parsed); err != nil {
 			log.Printf("UploadAndParseCV: Could not unmarshal string format: %v", err)
 			return ProfileDTO{}
 		}
-		
+
 		return parsed
 	}
 
 	return ProfileDTO{}
 }
 
-// StartDaemon initializes the Playwright robot with the profile constraints
+// StartDaemon spawns the filler subprocess (batch job for applying to FORJADO applications)
 func (a *App) StartDaemon(cfg ProfileDTO) bool {
-	log.Printf("🚀 WAILS: Launching Automation Daemon with config: %+v", cfg)
-	
-	// TODO: Spawn `exec.Command` or trigger internal `automation.go` goroutine 
-	// specific to the Playwright core. 
-	// For now, we simulate backend readiness to the UI:
+	log.Printf("🚀 WAILS: Launching Filler Daemon with config: %+v", cfg)
+
+	// Spawn filler as background subprocess; don't block UI
+	go func() {
+		// TODO: In production, build a cross-platform binary or use go run
+		// For development: use `go run` from project root
+		// Ensure we're in the correct working directory
+		cmd := exec.Command("go", "run", "./cmd/filler")
+
+		// Set working directory to project root (parent of dashboard)
+		cmd.Dir = ".."
+
+		// Inherit environment variables (includes .env via godotenv in filler)
+		cmd.Env = os.Environ()
+
+		// Capture output
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+
+		// Execute
+		if err := cmd.Run(); err != nil {
+			log.Printf("❌ Filler exited with error: %v\nStdout: %s\nStderr: %s",
+				err, stdout.String(), stderr.String())
+		} else {
+			log.Printf("✅ Filler completed successfully\nOutput: %s", stdout.String())
+		}
+	}()
+
 	return true
 }
 
@@ -460,7 +595,7 @@ func (a *App) VerifyIMAP(cfg SettingsDTO) bool {
 	if addr == "" {
 		addr = "imap.gmail.com:993"
 	}
-	
+
 	log.Println("IMAP Verify: Dialing", addr)
 	// Must locally import to avoid scope issues in this standalone function
 	importClient := func() bool {
@@ -477,11 +612,10 @@ func (a *App) VerifyIMAP(cfg SettingsDTO) bool {
 			log.Printf("VerifyIMAP: Login failed: %v", err)
 			return false
 		}
-		
+
 		log.Println("VerifyIMAP: Success!")
 		return true
 	}
-	
+
 	return importClient()
 }
-
