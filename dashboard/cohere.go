@@ -36,7 +36,6 @@ type cohereChatResponse struct {
 }
 
 // ClassifyEmail classifica o corpo de um email como REJEICAO, ENTREVISTA ou OUTRO.
-// Tarefa 53
 func (c *CohereClient) ClassifyEmail(body string) (string, error) {
 	if c.apiKey == "" {
 		return "OUTRO", fmt.Errorf("COHERE_API_KEY not defined")
@@ -48,7 +47,7 @@ If it's neither, classify as "OUTRO".
 Respond directly with ONLY ONE of these three strict labels: "REJEICAO", "ENTREVISTA" or "OUTRO". Do not add any punctuation.`
 
 	reqBody := cohereChatRequest{
-		Model:            "command-r", // Light, fast instruction-based model 
+		Model:            "command-r", // Modelo leve e rápido para instrução curta.
 		Message:          "Email Body:\n\n" + body,
 		PreambleOverride: preamble,
 		Temperature:      0.1,
@@ -89,7 +88,6 @@ Respond directly with ONLY ONE of these three strict labels: "REJEICAO", "ENTREV
 }
 
 // GenerateOutreachMessage monta uma mensagem curta para contato direto no LinkedIn.
-// Tarefa 56: contornar o ATS via mensagem direta.
 func (c *CohereClient) GenerateOutreachMessage(recruiterName, roleName string) (string, error) {
 	if c.apiKey == "" {
 		return "", fmt.Errorf("COHERE_API_KEY not defined")
@@ -114,7 +112,7 @@ Output ONLY the message body, no placeholders, no quotes.`
 		Model:            "command-r",
 		Message:          messagePrompt,
 		PreambleOverride: preamble,
-		Temperature:      0.4, // slight creativity for natural text
+		Temperature:      0.4, // Leve criatividade para soar natural sem perder foco.
 	}
 
 	jsonData, err := json.Marshal(reqBody)
