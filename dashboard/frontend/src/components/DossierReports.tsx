@@ -50,9 +50,9 @@ export function DossierReports() {
     setIsGenerating(true);
     try {
       const result = await GerarDossieEstudos(selectedInterview.corpo || '');
-      setDossierText(result || 'Falha ao gerar dossiê.');
+      setDossierText(result || 'Failed to generate dossier.');
     } catch (err) {
-      setDossierText(`Erro ao gerar dossiê: ${String(err)}`);
+      setDossierText(`Error generating dossier: ${String(err)}`);
     } finally {
       setIsGenerating(false);
     }
@@ -74,7 +74,7 @@ export function DossierReports() {
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-white w-full">
-      {/* Contextual Header */}
+      {/* Cabeçalho contextual da tela de dossiês. */}
       <div className="flex items-center justify-between px-10 py-6 shrink-0 border-b border-zinc-100">
         <div className="flex items-center gap-2 text-on-surface-variant">
           <span className="text-[0.6875rem] font-medium uppercase tracking-widest opacity-60">Reports</span>
@@ -83,20 +83,20 @@ export function DossierReports() {
         </div>
         <button onClick={handleExport} disabled={!dossierText.trim()} className="px-4 py-2 text-[0.875rem] font-medium rounded-lg flex items-center gap-2 border transition disabled:text-zinc-400 disabled:border-zinc-200 disabled:cursor-not-allowed text-zinc-800 border-zinc-300 hover:bg-zinc-50">
           <span className="material-symbols-outlined text-sm">picture_as_pdf</span>
-          Exportar Dossiê (.txt)
+          Export Dossier (.txt)
         </button>
       </div>
 
       <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[360px_1fr]">
         <aside className="border-r border-zinc-100 p-6 overflow-y-auto no-scrollbar">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xs font-bold tracking-widest uppercase text-zinc-500">Convites de Entrevista</h2>
+            <h2 className="text-xs font-bold tracking-widest uppercase text-zinc-500">Interview Invites</h2>
             <span className="text-xs font-mono text-zinc-400">{interviews.length}</span>
           </div>
 
           <div className="space-y-3">
             {loading && (
-              <div className="p-4 text-sm text-zinc-500 border border-zinc-200 rounded-lg">Carregando entrevistas...</div>
+              <div className="p-4 text-sm text-zinc-500 border border-zinc-200 rounded-lg">Loading interviews...</div>
             )}
 
             {!loading && interviews.map((item) => (
@@ -107,7 +107,7 @@ export function DossierReports() {
             ))}
 
             {!loading && interviews.length === 0 && (
-              <div className="p-4 text-sm text-zinc-500 border border-zinc-200 rounded-lg">Nenhum convite de entrevista encontrado no banco.</div>
+              <div className="p-4 text-sm text-zinc-500 border border-zinc-200 rounded-lg">No interview invites were found in the database.</div>
             )}
           </div>
         </aside>
@@ -115,11 +115,11 @@ export function DossierReports() {
         <section className="p-8 overflow-y-auto no-scrollbar flex flex-col gap-6">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <h3 className="text-lg font-semibold text-zinc-900">Dossiê Estratégico</h3>
-              <p className="text-sm text-zinc-500">Selecione uma entrevista e gere um plano com Gemini.</p>
+              <h3 className="text-lg font-semibold text-zinc-900">Strategic Dossier</h3>
+              <p className="text-sm text-zinc-500">Select an interview and generate a plan with Gemini.</p>
             </div>
             <button onClick={handleGenerate} disabled={!selectedInterview || isGenerating} className="px-4 py-2 text-sm font-semibold rounded-lg bg-zinc-900 text-white hover:bg-zinc-800 disabled:bg-zinc-300 disabled:cursor-not-allowed">
-              {isGenerating ? 'Gerando...' : 'Gerar Dossiê'}
+              {isGenerating ? 'Generating...' : 'Generate Dossier'}
             </button>
           </div>
 
@@ -127,12 +127,12 @@ export function DossierReports() {
             <div className="p-4 border border-zinc-200 rounded-lg bg-zinc-50">
               <p className="text-sm font-semibold text-zinc-900">{selectedInterview.nome || selectedInterview.email}</p>
               <p className="text-xs text-zinc-500 mt-1">{selectedInterview.email}</p>
-              <p className="text-sm text-zinc-700 mt-3 whitespace-pre-wrap">{selectedInterview.corpo || 'Sem corpo de email disponível.'}</p>
+              <p className="text-sm text-zinc-700 mt-3 whitespace-pre-wrap">{selectedInterview.corpo || 'No email body available.'}</p>
             </div>
           )}
 
           <div className="min-h-[320px] p-5 border border-zinc-200 rounded-lg bg-white text-sm text-zinc-700 whitespace-pre-wrap">
-            {dossierText || 'Clique em Gerar Dossiê para processar o email selecionado.'}
+            {dossierText || 'Click Generate Dossier to process the selected email.'}
           </div>
         </section>
       </div>
