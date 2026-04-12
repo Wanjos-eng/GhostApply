@@ -3,7 +3,7 @@
 //! # Intenção
 //! Carrega variáveis sensíveis do `.env` *uma única vez* na inicialização.
 //!
-//! # Restrição (SecOps — Tarefa 04)
+//! # Restrição (SecOps)
 //! `db_encryption_key` é marcado com `Zeroize`/`ZeroizeOnDrop`: ao sair do
 //! escopo (Drop), os bytes da chave são sobrescritos com zeros na RAM,
 //! prevenindo ataques de extração de memória (cold-boot, /proc/mem dumps).
