@@ -40,7 +40,7 @@ type cookieFile struct {
 	SameSite string  `json:"sameSite"`
 }
 
-// LoadCookies lê um session.json e injeta os cookies no BrowserContext.
+// LoadCookies lê um session.json e injeta os cookies no contexto do navegador.
 func LoadCookies(ctx playwright.BrowserContext, path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -85,7 +85,7 @@ func HumanSleep() {
 	time.Sleep(time.Duration(ms) * time.Millisecond)
 }
 
-// TypeHumanly writes string text into a locator, pausing between 50 and 150ms per keystroke.
+// TypeHumanly digita texto em um locator com pausas entre 50 e 150ms por tecla.
 func TypeHumanly(loc playwright.Locator, text string) error {
 	if err := loc.Fill(""); err != nil {
 		return fmt.Errorf("TypeHumanly: failed to clear initial field: %w", err)
