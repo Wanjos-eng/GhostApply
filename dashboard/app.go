@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"sort"
 	"time"
 
 	"github.com/emersion/go-imap/client"
@@ -40,18 +41,58 @@ type VagaHistoricoDTO struct {
 	CriadoEm          string `json:"criado_em"`
 }
 
-// App struct
+type PerformanceSuiteDTO struct {
+	RanAt             string `json:"ran_at"`
+	Samples           int    `json:"samples"`
+	DatabasePingP95MS float64 `json:"database_ping_p95_ms"`
+	DatabasePingP99MS float64 `json:"database_ping_p99_ms"`
+	DatabasePingMS    float64 `json:"database_ping_ms"`
+	FetchHistoryP95MS float64 `json:"fetch_history_p95_ms"`
+	FetchHistoryP99MS float64 `json:"fetch_history_p99_ms"`
+	FetchHistoryMS    float64 `json:"fetch_history_ms"`
+	FetchEmailsP95MS  float64 `json:"fetch_emails_p95_ms"`
+	FetchEmailsP99MS  float64 `json:"fetch_emails_p99_ms"`
+	FetchEmailsMS     float64 `json:"fetch_emails_ms"`
+	FetchInterP95MS   float64 `json:"fetch_interviews_p95_ms"`
+	FetchInterP99MS   float64 `json:"fetch_interviews_p99_ms"`
+	FetchInterviewsMS float64 `json:"fetch_interviews_ms"`
+	TotalSuiteP95MS   float64 `json:"total_suite_p95_ms"`
+	TotalSuiteP99MS   float64 `json:"total_suite_p99_ms"`
+	HistoryRows       int    `json:"history_rows"`
+	EmailRows         int    `json:"email_rows"`
+	InterviewRows     int    `json:"interview_rows"`
+	TotalSuiteMS      float64 `json:"total_suite_ms"`
+	DatabaseReachable bool   `json:"database_reachable"`
+}
+
+func percentileFloat64(values []float64, percentile float64) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+	sorted := append([]float64(nil), values...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	idx := int(float64(len(sorted)-1) * percentile)
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= len(sorted) {
+		idx = len(sorted) - 1
+	}
+	return sorted[idx]
+}
+
+// Estrutura principal da aplicação Wails.
 type App struct {
 	ctx      context.Context
 	database *sql.DB
 }
 
-// NewApp creates a new App application struct
+// Cria a instância principal do app.
 func NewApp() *App {
 	return &App{}
 }
 
-// startup is called when the app starts
+// Executa a inicialização quando o app sobe.
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	godotenv.Load("../.env")
@@ -76,7 +117,7 @@ func (a *App) startup(ctx context.Context) {
 	if err != nil {
 		log.Printf("WAILS: Failed to open db connection: %v\n", err)
 	} else {
-		// Initialize missing tables dynamically to prevent UI polling crash
+		// Garante as tabelas mínimas para a UI não quebrar no primeiro acesso.
 		_, initErr := database.Exec(`
 			CREATE TABLE IF NOT EXISTS Vaga_Prospectada (
 				id TEXT PRIMARY KEY NOT NULL,
@@ -121,11 +162,11 @@ func (a *App) startup(ctx context.Context) {
 		a.database = database
 	}
 
-	// Trigger background sync task
+	// Dispara a sincronização de emails em background para não travar a abertura.
 	go a.SyncEmailsRoutine()
 }
 
-// FetchEmails returns the emails parsed mapped for the Kanban GUI.
+// Retorna os emails já classificados para o quadro do dashboard.
 func (a *App) FetchEmails() []EmailRecrutador {
 	if a.database == nil {
 		return nil
@@ -148,7 +189,7 @@ func (a *App) FetchEmails() []EmailRecrutador {
 	return results
 }
 
-// FetchInterviews directly requests specifically "ENTREVISTA" entries for priority viewing.
+// Filtra apenas os emails marcados como entrevista.
 func (a *App) FetchInterviews() []EmailRecrutador {
 	var ints []EmailRecrutador
 	for _, em := range a.FetchEmails() {
@@ -159,7 +200,7 @@ func (a *App) FetchInterviews() []EmailRecrutador {
 	return ints
 }
 
-// FetchHistory returns deeply nested applications + prospects across AI state lifecycle.
+// Monta a visão de histórico com vagas e candidaturas.
 func (a *App) FetchHistory() []VagaHistoricoDTO {
 	if a.database == nil {
 		return nil
@@ -200,7 +241,7 @@ func (a *App) FetchHistory() []VagaHistoricoDTO {
 	return results
 }
 
-// SyncEmailsRoutine hooks into imap_listener.go and cohere.go
+// Sincroniza a caixa de entrada e grava o resultado no banco.
 func (a *App) SyncEmailsRoutine() {
 	if a.database == nil {
 		return
@@ -227,7 +268,7 @@ func (a *App) SyncEmailsRoutine() {
 			log.Printf("SyncEmails: Cohere failure: %v\n", err)
 		}
 
-		// Map mock logic persistence inside Email_Recrutador table
+		// Salva a mensagem classificada para a UI conseguir mostrar depois.
 		pseudoUUID := fmt.Sprintf("email-%d", seqId)
 		_, execErr := a.database.Exec("INSERT INTO Email_Recrutador (id, email, classificacao, corpo) VALUES (?, ?, ?, ?)",
 			pseudoUUID, "recruiter@example.com", classificacao, body)
@@ -239,7 +280,7 @@ func (a *App) SyncEmailsRoutine() {
 	}
 }
 
-// GenerateOutreachMessage chama o Cohere para fabricar mensagem de abordagem quente
+// Gera uma mensagem de abordagem com Cohere.
 func (a *App) GenerateOutreachMessage(recruiterName, roleName string) string {
 	cohere := NewCohereClient()
 	msg, err := cohere.GenerateOutreachMessage(recruiterName, roleName)
@@ -249,8 +290,7 @@ func (a *App) GenerateOutreachMessage(recruiterName, roleName string) string {
 	return msg
 }
 
-// GerarDossieEstudos invokes Gemini against the body of an interview email
-// Task 55: Dossier Generator overlay callback with Web Search Grounding
+// Envia o email selecionado para o Gemini e retorna o texto do dossiê.
 func (a *App) GerarDossieEstudos(emailBody string) string {
 	apiKey := os.Getenv("GEMINI_API_KEY")
 	if apiKey == "" {
@@ -318,7 +358,7 @@ Conteúdo do Email de Entrevista:
 	return "Falha inesperada ao gerar dossiê."
 }
 
-// GetSystemStatus checks AI and email connection health
+// Verifica a saúde das integrações usadas pelo dashboard.
 func (a *App) GetSystemStatus() map[string]interface{} {
 	status := map[string]interface{}{
 		"database": "✓ OK",
@@ -328,7 +368,7 @@ func (a *App) GetSystemStatus() map[string]interface{} {
 		"imap":     "✗ OFFLINE",
 	}
 
-	// Check database
+	// Banco local
 	if a.database != nil {
 		if err := a.database.Ping(); err != nil {
 			status["database"] = "✗ ERRO"
@@ -337,10 +377,10 @@ func (a *App) GetSystemStatus() map[string]interface{} {
 		status["database"] = "✗ ERRO"
 	}
 
-	// Check Cohere API
+	// Cohere
 	cohere := NewCohereClient()
 	if cohere.apiKey != "" {
-		// Try a simple health check by testing the API
+		// Faz um teste rápido na API para validar conectividade.
 		resp, err := http.Post(
 			"https://api.cohere.ai/v1/health",
 			"application/json",
@@ -356,7 +396,7 @@ func (a *App) GetSystemStatus() map[string]interface{} {
 		}
 	}
 
-	// Check Groq API (basic connectivity)
+	// Groq
 	groqKey := os.Getenv("GROQ_API_KEY")
 	if groqKey != "" {
 		req, err := http.NewRequest("GET", "https://api.groq.com/", nil)
@@ -370,7 +410,7 @@ func (a *App) GetSystemStatus() map[string]interface{} {
 		}
 	}
 
-	// Check Gemini API
+	// Gemini
 	geminiKey := os.Getenv("GEMINI_API_KEY")
 	if geminiKey != "" {
 		url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=%s", geminiKey)
@@ -386,7 +426,7 @@ func (a *App) GetSystemStatus() map[string]interface{} {
 		}
 	}
 
-	// Check IMAP
+	// IMAP
 	imapServer := os.Getenv("IMAP_SERVER")
 	if imapServer != "" {
 		_, err := NewIMAPListener()
@@ -398,8 +438,78 @@ func (a *App) GetSystemStatus() map[string]interface{} {
 	return status
 }
 
+// Executa as medições de tempo que alimentam os cards de performance do dashboard.
+func (a *App) RunPerformanceSuite() PerformanceSuiteDTO {
+	suiteStart := time.Now()
+	result := PerformanceSuiteDTO{
+		RanAt:             time.Now().UTC().Format(time.RFC3339),
+		Samples:           21,
+		DatabaseReachable: false,
+	}
+
+	if a.database == nil {
+		result.TotalSuiteMS = float64(time.Since(suiteStart).Microseconds()) / 1000
+		return result
+	}
+
+	pingRuns := make([]float64, 0, result.Samples)
+	historyRuns := make([]float64, 0, result.Samples)
+	emailRuns := make([]float64, 0, result.Samples)
+	interviewRuns := make([]float64, 0, result.Samples)
+	totalRuns := make([]float64, 0, result.Samples)
+
+	for i := 0; i < result.Samples; i++ {
+		iterStart := time.Now()
+
+		pingStart := time.Now()
+		if err := a.database.Ping(); err == nil {
+			result.DatabaseReachable = true
+		}
+		pingRuns = append(pingRuns, float64(time.Since(pingStart).Microseconds())/1000)
+
+		historyStart := time.Now()
+		history := a.FetchHistory()
+		historyRuns = append(historyRuns, float64(time.Since(historyStart).Microseconds())/1000)
+		result.HistoryRows = len(history)
+
+		emailsStart := time.Now()
+		emails := a.FetchEmails()
+		emailRuns = append(emailRuns, float64(time.Since(emailsStart).Microseconds())/1000)
+		result.EmailRows = len(emails)
+
+		interviewsStart := time.Now()
+		interviews := a.FetchInterviews()
+		interviewRuns = append(interviewRuns, float64(time.Since(interviewsStart).Microseconds())/1000)
+		result.InterviewRows = len(interviews)
+
+		totalRuns = append(totalRuns, float64(time.Since(iterStart).Microseconds())/1000)
+	}
+
+	result.DatabasePingMS = percentileFloat64(pingRuns, 0.50)
+	result.DatabasePingP95MS = percentileFloat64(pingRuns, 0.95)
+	result.DatabasePingP99MS = percentileFloat64(pingRuns, 0.99)
+
+	result.FetchHistoryMS = percentileFloat64(historyRuns, 0.50)
+	result.FetchHistoryP95MS = percentileFloat64(historyRuns, 0.95)
+	result.FetchHistoryP99MS = percentileFloat64(historyRuns, 0.99)
+
+	result.FetchEmailsMS = percentileFloat64(emailRuns, 0.50)
+	result.FetchEmailsP95MS = percentileFloat64(emailRuns, 0.95)
+	result.FetchEmailsP99MS = percentileFloat64(emailRuns, 0.99)
+
+	result.FetchInterviewsMS = percentileFloat64(interviewRuns, 0.50)
+	result.FetchInterP95MS = percentileFloat64(interviewRuns, 0.95)
+	result.FetchInterP99MS = percentileFloat64(interviewRuns, 0.99)
+
+	result.TotalSuiteMS = percentileFloat64(totalRuns, 0.50)
+	result.TotalSuiteP95MS = percentileFloat64(totalRuns, 0.95)
+	result.TotalSuiteP99MS = percentileFloat64(totalRuns, 0.99)
+	_ = suiteStart
+	return result
+}
+
 // ----------------------------------------------------
-// Settings & Config Structs for UI Bindings
+// Estruturas de settings e configuração expostas para a UI
 // ----------------------------------------------------
 
 type SettingsDTO struct {
@@ -419,7 +529,7 @@ type ProfileDTO struct {
 	AppsPerDay     int      `json:"apps_per_day"`
 }
 
-// LoadSettings reads the local .env mapping into the frontend Settings UI
+// Carrega o mapeamento local do .env para a tela de configurações do frontend.
 func (a *App) LoadSettings() SettingsDTO {
 	godotenv.Load("../.env")
 	return SettingsDTO{
@@ -432,7 +542,7 @@ func (a *App) LoadSettings() SettingsDTO {
 	}
 }
 
-// SaveSettings writes the map string values back down to the local .env securely
+// Persiste os valores do mapa de volta no .env local de forma segura.
 func (a *App) SaveSettings(cfg SettingsDTO) bool {
 	envMap := map[string]string{
 		"COHERE_API_KEY": cfg.CohereAPIKey,
@@ -443,7 +553,7 @@ func (a *App) SaveSettings(cfg SettingsDTO) bool {
 		"IMAP_PASS":      cfg.ImapPass,
 	}
 
-	// Persist to .env
+	// Persiste no .env local.
 	err := godotenv.Write(envMap, "../.env")
 	if err != nil {
 		log.Printf("SaveSettings: Failed to write .env: %v", err)
@@ -452,9 +562,9 @@ func (a *App) SaveSettings(cfg SettingsDTO) bool {
 	return true
 }
 
-// UploadAndParseCV invokes native file picker, extracts text from PDF and asks Gemini for JSON
+// Abre o seletor nativo, extrai o texto do PDF e pede ao Gemini o JSON estruturado.
 func (a *App) UploadAndParseCV() ProfileDTO {
-	// 1. Invoke OS Dialog
+	// 1. Abre o diálogo do sistema operacional.
 	filePath, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
 		Title: "Select your CV (PDF)",
 		Filters: []runtime.FileFilter{
@@ -468,7 +578,7 @@ func (a *App) UploadAndParseCV() ProfileDTO {
 
 	log.Println("Parsing PDF File:", filePath)
 
-	// 2. Read PDF Text
+	// 2. Lê o texto do PDF.
 	f, r, err := pdf.Open(filePath)
 	if err != nil {
 		log.Printf("UploadAndParseCV: Fail to open PDF: %v\n", err)
@@ -485,7 +595,7 @@ func (a *App) UploadAndParseCV() ProfileDTO {
 	buf.ReadFrom(b)
 	textContent := buf.String()
 
-	// 3. Setup Gemini Request to structure into TargetRoles / CoreStack
+	// 3. Monta a requisição para o Gemini estruturar TargetRoles e CoreStack.
 	apiKey := os.Getenv("GEMINI_API_KEY")
 	if apiKey == "" {
 		log.Println("UploadAndParseCV: No GEMINI_API_KEY found")
@@ -539,7 +649,7 @@ CV Text:
 
 		log.Println("Gemini Extracted JSON:", geminiJSON)
 		var parsed ProfileDTO
-		// Fill defaults
+		// Preenche os valores padrão.
 		parsed.StrictlyRemote = true
 		parsed.MinSalaryFloor = "$120,000"
 		parsed.AppsPerDay = 50
@@ -555,29 +665,27 @@ CV Text:
 	return ProfileDTO{}
 }
 
-// StartDaemon spawns the filler subprocess (batch job for applying to FORJADO applications)
+// StartDaemon inicia o job batch do filler em segundo plano.
 func (a *App) StartDaemon(cfg ProfileDTO) bool {
 	log.Printf("🚀 WAILS: Launching Filler Daemon with config: %+v", cfg)
 
-	// Spawn filler as background subprocess; don't block UI
+	// Sobe o filler como subprocesso em background sem travar a UI.
 	go func() {
-		// TODO: In production, build a cross-platform binary or use go run
-		// For development: use `go run` from project root
-		// Ensure we're in the correct working directory
+		// Usa go run a partir da raiz do repositório durante o desenvolvimento.
 		cmd := exec.Command("go", "run", "./cmd/filler")
 
-		// Set working directory to project root (parent of dashboard)
+		// Executa a partir da raiz do projeto para o filler resolver os caminhos.
 		cmd.Dir = ".."
 
-		// Inherit environment variables (includes .env via godotenv in filler)
+		// Herda o ambiente atual; o filler lê o .env na inicialização.
 		cmd.Env = os.Environ()
 
-		// Capture output
+		// Captura stdout e stderr para diagnóstico se o processo encerrar cedo.
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
 
-		// Execute
+		// Executa de forma síncrona dentro da goroutine.
 		if err := cmd.Run(); err != nil {
 			log.Printf("❌ Filler exited with error: %v\nStdout: %s\nStderr: %s",
 				err, stdout.String(), stderr.String())
@@ -589,7 +697,7 @@ func (a *App) StartDaemon(cfg ProfileDTO) bool {
 	return true
 }
 
-// VerifyIMAP tests if the supplied configuration can connect and authenticate properly
+// Verifica se a configuração fornecida consegue conectar e autenticar no IMAP.
 func (a *App) VerifyIMAP(cfg SettingsDTO) bool {
 	addr := cfg.ImapServer
 	if addr == "" {
@@ -597,10 +705,8 @@ func (a *App) VerifyIMAP(cfg SettingsDTO) bool {
 	}
 
 	log.Println("IMAP Verify: Dialing", addr)
-	// Must locally import to avoid scope issues in this standalone function
 	importClient := func() bool {
-		// Import already global at file level: "github.com/emersion/go-imap/client"
-		// Dialing TLS
+			// Mantém a lógica de conexão isolada neste helper.
 		c, err := client.DialTLS(addr, nil)
 		if err != nil {
 			log.Printf("VerifyIMAP: Dial failed: %v", err)
