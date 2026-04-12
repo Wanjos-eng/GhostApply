@@ -15,18 +15,17 @@ use zeroize::Zeroize;
 const GEMINI_API_URL: &str =
     "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
 
-/// Prompt de geração de currículo (Task 32).
-/// Interpola currículo + vaga e pede Markdown estruturado como saída.
-const GENERATION_PROMPT: &str = r#"Você é um especialista em currículos ATS-friendly.
+const GENERATION_PROMPT: &str = r#"Você é um especialista em currículos ATS-friendly e posicionamento estratégico.
 
 Receba dois blocos de texto:
 1. CURRÍCULO BASE do candidato
 2. DESCRIÇÃO DA VAGA alvo
 
 Sua tarefa:
-- Adapte o currículo para máxima relevância com a vaga
-- Mantenha APENAS informações verdadeiras do currículo base
-- Use formato Markdown estruturado com seções: Resumo, Experiência, Habilidades, Formação
+- Adapte o currículo para máxima relevância com a vaga, focando estritamente em IMPACTO e ARQUITETURA.
+- Em vez de listar linguagens genéricas (ex: 'CRUD em Node'), force o destaque na capacidade de engenharia de software: evidencie fortemente projetos de aplicações desktop híbridas de alta performance (Wails, Go, Tauri, Rust) e construções complexas (interpretadores lógicos, AST, algoritmos avançados).
+- Mantenha APENAS informações verdadeiras do currículo base.
+- Use formato Markdown estruturado com seções: Resumo, Ouro Oculto (Experiência/Projetos Críticos), Habilidades, Formação.
 - NÃO adicione saudações, despedidas ou comentários. Retorne APENAS o Markdown do currículo."#;
 
 // ── Serde structs (Task 31) ──────────────────────────────────────────────────
