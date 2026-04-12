@@ -10,18 +10,18 @@ import (
 	"github.com/emersion/go-message/mail"
 )
 
-// IMAPListener handles connections and message extractions
+// IMAPListener concentra a conexão IMAP e a extração das mensagens.
 type IMAPListener struct {
 	client *client.Client
 }
 
-// NewIMAPListener connects to IMAP via TLS using .env credentials
-// Default config focuses on robust TLS support.
+// NewIMAPListener conecta ao IMAP via TLS usando as credenciais do .env.
+// A configuração padrão prioriza estabilidade de TLS.
 func NewIMAPListener() (*IMAPListener, error) {
 	addr := os.Getenv("IMAP_SERVER") + ":" + os.Getenv("IMAP_PORT")
 	
 	log.Println("IMAP: Connecting to server...")
-	// Task 51: Secure TLS connection
+	// Tarefa 51: conexão IMAP com TLS seguro.
 	c, err := client.DialTLS(addr, nil)
 	if err != nil {
 		return nil, err
@@ -37,8 +37,8 @@ func NewIMAPListener() (*IMAPListener, error) {
 	return &IMAPListener{client: c}, nil
 }
 
-// FetchUnseenEmailBodies retrieves the textual bodies of all UNSEEN emails
-// Task 52: Extract unseen emails
+// FetchUnseenEmailBodies lê o corpo textual de todos os emails não vistos.
+// Tarefa 52: extrair emails não lidos.
 func (l *IMAPListener) FetchUnseenEmailBodies() (map[uint32]string, error) {
 	mbox, err := l.client.Select("INBOX", false)
 	if err != nil {
@@ -58,7 +58,7 @@ func (l *IMAPListener) FetchUnseenEmailBodies() (map[uint32]string, error) {
 	}
 
 	if len(seqNums) == 0 {
-		return nil, nil // None unseen
+		return nil, nil // Nenhuma mensagem não lida.
 	}
 
 	seqset := new(imap.SeqSet)
@@ -82,7 +82,7 @@ func (l *IMAPListener) FetchUnseenEmailBodies() (map[uint32]string, error) {
 			continue
 		}
 
-		// Create a new mail reader
+		// Cria um leitor de e-mail para o corpo retornado.
 		mr, err := mail.CreateReader(r)
 		if err != nil {
 			log.Printf("IMAP: Failed creating mail reader: %v", err)
@@ -91,15 +91,15 @@ func (l *IMAPListener) FetchUnseenEmailBodies() (map[uint32]string, error) {
 		
 		var bodyBuilder strings.Builder
 
-		// Process each text part of the email
+		// Processa cada parte textual do email.
 		for {
 			p, err := mr.NextPart()
 			if err != nil {
-				break // EOF
+				break // Fim do conteúdo.
 			}
 			switch h := p.Header.(type) {
 			case *mail.InlineHeader:
-				// Only extract text/plain or text/html
+				// Extrai apenas text/plain ou text/html.
 				contentType, _, _ := h.ContentType()
 				if strings.HasPrefix(contentType, "text/plain") {
 					buf := make([]byte, 1024)
@@ -127,7 +127,7 @@ func (l *IMAPListener) FetchUnseenEmailBodies() (map[uint32]string, error) {
 	return results, nil
 }
 
-// MarkAsSeen tags explicit emails so they don't get processed twice
+// MarkAsSeen marca os emails já processados para evitar duplicidade.
 func (l *IMAPListener) MarkAsSeen(seqNum uint32) error {
 	seqset := new(imap.SeqSet)
 	seqset.AddNum(seqNum)
