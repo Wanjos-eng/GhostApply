@@ -1,13 +1,13 @@
 //! Migrations do schema do banco de dados.
 //!
-//! # Intent
+//! # Intenção
 //! Criar o schema idempotente (`IF NOT EXISTS`) em uma única transação atômica.
 //! Falhar em qualquer DDL reverte tudo — nunca deixa o banco em estado parcial.
 //!
 //! # Tabelas
-//! - `Vaga_Prospectada`   — vagas capturadas de portais (Task 07)
-//! - `Candidatura_Forjada`— candidaturas geradas, FK para Vaga (Task 08)
-//! - `Email_Recrutador`   — e-mails de recrutadores capturados (Task 09)
+//! - `Vaga_Prospectada`   — vagas capturadas de portais (Tarefa 07)
+//! - `Candidatura_Forjada`— candidaturas geradas, FK para Vaga (Tarefa 08)
+//! - `Email_Recrutador`   — e-mails de recrutadores capturados (Tarefa 09)
 
 use anyhow::{Context, Result};
 use rusqlite::Connection;
