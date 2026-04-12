@@ -53,30 +53,19 @@ func ExtractVagas(page playwright.Page) ([]domain.Vaga, error) {
 		return nil, fmt.Errorf("ExtractVagas: failed to locate job cards: %w", err)
 	}
 
-	var (
-		mu      sync.Mutex
-		wg      sync.WaitGroup
-		results []domain.Vaga
-	)
-
+	// Sequential processing: Playwright page is NOT thread-safe.
+	// Concurrent goroutines calling Click()/InnerText() on the same page
+	// cause race conditions. Sequential with HumanSleep between cards also
+	// produces browsing cadence indistinguishable from a real user.
+	var results []domain.Vaga
 	for _, card := range cards {
-		wg.Add(1)
-		go func(card playwright.Locator) {
-			defer wg.Done()
-
-			vaga, err := extractSingleCard(page, card)
-			if err != nil {
-				// Soft failure: skip malformed card, do not abort pipeline
-				return
-			}
-
-			mu.Lock()
-			results = append(results, vaga)
-			mu.Unlock()
-		}(card)
+		vaga, err := extractSingleCard(page, card)
+		if err != nil {
+			continue
+		}
+		results = append(results, vaga)
 	}
 
-	wg.Wait()
 	return results, nil
 }
 
