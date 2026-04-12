@@ -12,10 +12,10 @@ import (
 var assets embed.FS
 
 func main() {
-	// Create an instance of the app structure
+	// Instancia o app antes de subir o runtime do Wails.
 	app := NewApp()
 
-	// Create application with options
+	// Sobe a aplicação com a configuração padrão do dashboard.
 	err := wails.Run(&options.App{
 		Title:  "dashboard",
 		Width:  1024,
