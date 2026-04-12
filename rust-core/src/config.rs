@@ -25,6 +25,12 @@ pub struct AppConfig {
     /// Após estabelecer a conexão com o banco, descarte o `AppConfig` explicitamente
     /// para acionar o zeroize o mais cedo possível.
     pub db_encryption_key: String,
+
+    /// Chave de API do Groq (usada para triagem).
+    pub groq_api_key: String,
+
+    /// Chave de API do Gemini (usada para geração de currículo).
+    pub gemini_api_key: String,
 }
 
 impl AppConfig {
@@ -42,9 +48,17 @@ impl AppConfig {
         let db_encryption_key = std::env::var("DB_ENCRYPTION_KEY")
             .context("variável de ambiente DB_ENCRYPTION_KEY não definida")?;
 
+        let groq_api_key = std::env::var("GROQ_API_KEY")
+            .context("variável de ambiente GROQ_API_KEY não definida")?;
+
+        let gemini_api_key = std::env::var("GEMINI_API_KEY")
+            .context("variável de ambiente GEMINI_API_KEY não definida")?;
+
         Ok(Self {
             database_url,
             db_encryption_key,
+            groq_api_key,
+            gemini_api_key,
         })
     }
 }
