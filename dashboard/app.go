@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -20,6 +21,10 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
+
+const defaultIMAPAddress = "imap.gmail.com:993"
+
+var outboundHTTPClient = &http.Client{Timeout: 20 * time.Second}
 
 type EmailRecrutador struct {
 	ID            string `json:"id"`
@@ -142,6 +147,45 @@ func parseCreatedAt(value string) (time.Time, bool) {
 	}
 
 	return time.Time{}, false
+}
+
+func buildGeminiRequest(model, apiKey string, payload []byte) (*http.Request, error) {
+	endpoint := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent", model)
+	req, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(payload))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-goog-api-key", apiKey)
+	return req, nil
+}
+
+func mergeSettingsEnv(existing map[string]string, cfg SettingsDTO) map[string]string {
+	envMap := make(map[string]string, len(existing)+6)
+	for k, v := range existing {
+		envMap[k] = v
+	}
+
+	setSecret := func(key, value string) {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			if _, ok := envMap[key]; ok {
+				return
+			}
+			envMap[key] = ""
+			return
+		}
+		envMap[key] = value
+	}
+
+	envMap["IMAP_SERVER"] = strings.TrimSpace(cfg.ImapServer)
+	envMap["IMAP_USER"] = strings.TrimSpace(cfg.ImapUser)
+	setSecret("COHERE_API_KEY", cfg.CohereAPIKey)
+	setSecret("GROQ_API_KEY", cfg.GroqAPIKey)
+	setSecret("GEMINI_API_KEY", cfg.GeminiAPIKey)
+	setSecret("IMAP_PASS", cfg.ImapPass)
+
+	return envMap
 }
 
 // Estrutura principal da aplicação Wails.
@@ -385,6 +429,11 @@ func (a *App) SyncEmailsRoutine() {
 		log.Printf("SyncEmails: Failed IMAP: %v\n", err)
 		return
 	}
+	defer func() {
+		if imapClient != nil && imapClient.client != nil {
+			_ = imapClient.client.Logout()
+		}
+	}()
 
 	cohere := NewCohereClient()
 
@@ -430,8 +479,6 @@ func (a *App) GerarDossieEstudos(emailBody string) string {
 		return "GEMINI_API_KEY não está configurada."
 	}
 
-	url := "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + apiKey
-
 	prompt := `Você é um Staff Engineer e Coach Estratégico de Carreiras.
 Leia a mensagem de entrevista abaixo e cruze os requisitos da vaga com a minha experiência em Arquitetura (Projetos em Wails, Go, Tauri, Rust, AST).
 Diga-me EXATAMENTE:
@@ -460,7 +507,12 @@ Conteúdo do Email de Entrevista:
 
 	jsonValue, _ := json.Marshal(requestBody)
 
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonValue))
+	req, err := buildGeminiRequest("gemini-2.0-flash", apiKey, jsonValue)
+	if err != nil {
+		return fmt.Sprintf("Falha ao montar requisição Gemini: %v", err)
+	}
+
+	resp, err := outboundHTTPClient.Do(req)
 	if err != nil {
 		return fmt.Sprintf("Falha ao comunicar com Gemini: %v", err)
 	}
@@ -513,17 +565,16 @@ func (a *App) GetSystemStatus() map[string]interface{} {
 	// Cohere
 	cohere := NewCohereClient()
 	if cohere.apiKey != "" {
-		// Faz um teste rápido na API para validar conectividade.
-		resp, err := http.Post(
-			"https://api.cohere.ai/v1/health",
-			"application/json",
-			bytes.NewBufferString(`{}`),
-		)
-		if err == nil && (resp.StatusCode == 200 || resp.StatusCode == 404) {
-			status["cohere"] = "✓ OK"
-			resp.Body.Close()
-		} else {
-			if resp != nil {
+		// Faz um teste rápido autenticado na API para validar conectividade.
+		req, err := http.NewRequest("GET", "https://api.cohere.ai/v1/models", nil)
+		if err == nil {
+			req.Header.Set("Authorization", "Bearer "+cohere.apiKey)
+			req.Header.Set("Accept", "application/json")
+			resp, err := cohere.client.Do(req)
+			if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 500 {
+				status["cohere"] = "✓ OK"
+				resp.Body.Close()
+			} else if resp != nil {
 				resp.Body.Close()
 			}
 		}
@@ -532,12 +583,14 @@ func (a *App) GetSystemStatus() map[string]interface{} {
 	// Groq
 	groqKey := os.Getenv("GROQ_API_KEY")
 	if groqKey != "" {
-		req, err := http.NewRequest("GET", "https://api.groq.com/", nil)
+		req, err := http.NewRequest("GET", "https://api.groq.com/openai/v1/models", nil)
 		if err == nil {
-			client := &http.Client{Timeout: 5 * time.Second}
-			resp, err := client.Do(req)
-			if err == nil {
+			req.Header.Set("Authorization", "Bearer "+groqKey)
+			resp, err := outboundHTTPClient.Do(req)
+			if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 500 {
 				status["groq"] = "✓ OK"
+				resp.Body.Close()
+			} else if resp != nil {
 				resp.Body.Close()
 			}
 		}
@@ -546,14 +599,14 @@ func (a *App) GetSystemStatus() map[string]interface{} {
 	// Gemini
 	geminiKey := os.Getenv("GEMINI_API_KEY")
 	if geminiKey != "" {
-		url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=%s", geminiKey)
-		req, err := http.NewRequest("POST", url, bytes.NewBufferString(`{"contents":[]}`))
+		probe := []byte(`{"contents":[{"parts":[{"text":"ping"}]}]}`)
+		req, err := buildGeminiRequest("gemini-1.5-pro", geminiKey, probe)
 		if err == nil {
-			req.Header.Set("Content-Type", "application/json")
-			client := &http.Client{Timeout: 5 * time.Second}
-			resp, err := client.Do(req)
-			if err == nil {
+			resp, err := outboundHTTPClient.Do(req)
+			if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 500 {
 				status["gemini"] = "✓ OK"
+				resp.Body.Close()
+			} else if resp != nil {
 				resp.Body.Close()
 			}
 		}
@@ -562,9 +615,12 @@ func (a *App) GetSystemStatus() map[string]interface{} {
 	// IMAP
 	imapServer := os.Getenv("IMAP_SERVER")
 	if imapServer != "" {
-		_, err := NewIMAPListener()
+		listener, err := NewIMAPListener()
 		if err == nil {
 			status["imap"] = "✓ OK"
+			if listener != nil && listener.client != nil {
+				_ = listener.client.Logout()
+			}
 		}
 	}
 
@@ -666,32 +722,37 @@ type ProfileDTO struct {
 func (a *App) LoadSettings() SettingsDTO {
 	godotenv.Load("../.env")
 	return SettingsDTO{
-		CohereAPIKey: os.Getenv("COHERE_API_KEY"),
-		GroqAPIKey:   os.Getenv("GROQ_API_KEY"),
-		GeminiAPIKey: os.Getenv("GEMINI_API_KEY"),
+		// Não devolve segredos para o frontend por padrão.
+		CohereAPIKey: "",
+		GroqAPIKey:   "",
+		GeminiAPIKey: "",
 		ImapServer:   os.Getenv("IMAP_SERVER"),
 		ImapUser:     os.Getenv("IMAP_USER"),
-		ImapPass:     os.Getenv("IMAP_PASS"),
+		ImapPass:     "",
 	}
 }
 
 // Persiste os valores do mapa de volta no .env local de forma segura.
 func (a *App) SaveSettings(cfg SettingsDTO) bool {
-	envMap := map[string]string{
-		"COHERE_API_KEY": cfg.CohereAPIKey,
-		"GROQ_API_KEY":   cfg.GroqAPIKey,
-		"GEMINI_API_KEY": cfg.GeminiAPIKey,
-		"IMAP_SERVER":    cfg.ImapServer,
-		"IMAP_USER":      cfg.ImapUser,
-		"IMAP_PASS":      cfg.ImapPass,
+	existing, err := godotenv.Read("../.env")
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.Printf("SaveSettings: falha ao ler .env atual: %v", err)
+		return false
 	}
 
+	envMap := mergeSettingsEnv(existing, cfg)
+
 	// Persiste no .env local.
-	err := godotenv.Write(envMap, "../.env")
+	err = godotenv.Write(envMap, "../.env")
 	if err != nil {
 		log.Printf("SaveSettings: falha ao escrever .env: %v", err)
 		return false
 	}
+
+	if chmodErr := os.Chmod("../.env", 0o600); chmodErr != nil {
+		log.Printf("SaveSettings: aviso ao aplicar permissão restrita no .env: %v", chmodErr)
+	}
+
 	return true
 }
 
@@ -735,8 +796,6 @@ func (a *App) UploadAndParseCV() ProfileDTO {
 		return ProfileDTO{}
 	}
 
-	url := "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + apiKey
-
 	prompt := `I am providing a CV in raw text below.
 Please extract the 'TargetRoles' (which titles the candidate fits best) and 'CoreStack' (main programming languages and technologies, max 8 items).
 Return ONLY a valid JSON object starting with '{' and ending with '}' with keys: "target_roles": ["..."], "core_stack": ["..."]. Do not use markdown format blocks like ` + "```json" + `.
@@ -754,7 +813,13 @@ CV Text:
 	}
 
 	jsonValue, _ := json.Marshal(requestBody)
-	resp, httpErr := http.Post(url, "application/json", bytes.NewBuffer(jsonValue))
+	req, reqErr := buildGeminiRequest("gemini-2.0-flash", apiKey, jsonValue)
+	if reqErr != nil {
+		log.Printf("UploadAndParseCV: Failed to build Gemini request: %v\n", reqErr)
+		return ProfileDTO{}
+	}
+
+	resp, httpErr := outboundHTTPClient.Do(req)
 	if httpErr != nil {
 		log.Printf("UploadAndParseCV: Gemini HTTP Call Failed: %v\n", httpErr)
 		return ProfileDTO{}
@@ -832,9 +897,9 @@ func (a *App) StartDaemon(cfg ProfileDTO) bool {
 
 // Verifica se a configuração fornecida consegue conectar e autenticar no IMAP.
 func (a *App) VerifyIMAP(cfg SettingsDTO) bool {
-	addr := cfg.ImapServer
-	if addr == "" {
-		addr = "imap.gmail.com:993"
+	addr := composeIMAPAddr(cfg.ImapServer, "")
+	if strings.TrimSpace(cfg.ImapServer) == "" {
+		addr = defaultIMAPAddress
 	}
 
 	log.Println("IMAP Verify: Dialing", addr)
