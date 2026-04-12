@@ -17,12 +17,12 @@ import (
 
 // NewBrowser abre uma instância do Chromium com endurecimento contra bot.
 //
-// # Anti-Bot (Tarefa 16)
+// # Anti-Bot
 // --disable-blink-features=AutomationControlled oculta o `navigator.webdriver`.
 // Serviços de detecção de bot costumam usar esse sinal.
 func NewBrowser(pw *playwright.Playwright) (playwright.Browser, error) {
 	browser, err := pw.Chromium.Launch(playwright.BrowserTypeLaunchOptions{
-		Headless: playwright.Bool(true), // Tarefa 15: executa sem janela visível.
+		Headless: playwright.Bool(true), // Executa sem janela visível.
 		Args: []string{
 			"--disable-blink-features=AutomationControlled",
 			"--disable-infobars",
@@ -52,7 +52,7 @@ type cookieFile struct {
 
 // LoadCookies lê um session.json do Playwright e injeta os cookies no contexto.
 //
-// # Intenção (Tarefa 17)
+// # Intenção
 // Reutilizar uma sessão exportada evita cair no login wall e em CAPTCHA.
 func LoadCookies(ctx playwright.BrowserContext, path string) error {
 	data, err := os.ReadFile(path)
@@ -90,7 +90,7 @@ func LoadCookies(ctx playwright.BrowserContext, path string) error {
 
 // HumanSleep pausa a execução por uma duração aleatória entre 1000ms e 4500ms.
 //
-// # Anti-Bot (Tarefa 19)
+// # Anti-Bot
 // Padrões de tempo muito uniformes entregam automação.
 // Atrasos aleatórios imitam leitura humana e reduzem a chance de rate limit.
 func HumanSleep() {
@@ -98,6 +98,6 @@ func HumanSleep() {
 		minMs = 1000
 		maxMs = 4500
 	)
-	ms := minMs + rand.Intn(maxMs-minMs+1) //nolint:gosec // non-cryptographic: timing noise only
+	ms := minMs + rand.Intn(maxMs-minMs+1) //nolint:gosec // ruído de temporização, sem uso criptográfico
 	time.Sleep(time.Duration(ms) * time.Millisecond)
 }
