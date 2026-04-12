@@ -62,6 +62,36 @@ export namespace main {
 	        this.imap_pass = source["imap_pass"];
 	    }
 	}
+	export class VagaHistoricoDTO {
+	    vaga_id: string;
+	    titulo: string;
+	    empresa: string;
+	    url: string;
+	    vaga_status: string;
+	    candidatura_id: string;
+	    candidatura_status: string;
+	    recrutador_nome: string;
+	    recrutador_perfil: string;
+	    criado_em: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new VagaHistoricoDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.vaga_id = source["vaga_id"];
+	        this.titulo = source["titulo"];
+	        this.empresa = source["empresa"];
+	        this.url = source["url"];
+	        this.vaga_status = source["vaga_status"];
+	        this.candidatura_id = source["candidatura_id"];
+	        this.candidatura_status = source["candidatura_status"];
+	        this.recrutador_nome = source["recrutador_nome"];
+	        this.recrutador_perfil = source["recrutador_perfil"];
+	        this.criado_em = source["criado_em"];
+	    }
+	}
 
 }
 
