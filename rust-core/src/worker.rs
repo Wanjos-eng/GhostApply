@@ -1,11 +1,11 @@
-//! Worker que orquestra o pipeline multi-agente.
+//! Worker que executa a fila de vagas pendentes.
 //!
-//! # Fluxo (Tasks 29–30, 38)
-//! 1. Lê vagas `PENDENTE` do banco
-//! 2. Groq classifica se é remoto → NAO = `REJEITADO_PRESENCIAL`
-//! 3. Gemini gera currículo adaptado em Markdown
-//! 4. PDF é gerado e salvo em `/tmp/forja/{uuid}-cv.pdf`
-//! 5. Path do PDF é registrado em `Candidatura_Forjada` com status `FORJADO`
+//! Fluxo do worker:
+//! 1. Busca vagas com status `PENDENTE`
+//! 2. Usa Groq para separar remoto de presencial
+//! 3. Usa Gemini para montar o currículo adaptado
+//! 4. Gera o PDF em disco
+//! 5. Registra a candidatura com status `FORJADO`
 
 use std::path::Path;
 
@@ -16,20 +16,19 @@ use crate::llm::gemini_client::GeminiClient;
 use crate::llm::groq_client::GroqClient;
 use crate::pdf::generator;
 
-/// Vaga pendente carregada do banco para processamento.
+/// Estrutura interna para uma vaga pendente carregada do banco.
 struct VagaPendente {
     id: String,
     descricao: String,
 }
 
-/// Executa o pipeline multi-agente para todas as vagas PENDENTE.
+/// Processa todas as vagas pendentes em sequência.
 ///
-/// # Parâmetros
-/// - `conn`: conexão SQLCipher já autenticada
-/// - `groq`: cliente Groq para triagem remoto/presencial
-/// - `gemini`: cliente Gemini para geração de currículo
-/// - `curriculo_base`: conteúdo de `meu_curriculo.md`
-/// - `output_dir`: diretório para salvar PDFs (padrão: `/tmp/forja/`)
+/// `conn` precisa estar aberto e autenticado.
+/// `groq` faz a triagem inicial.
+/// `gemini` gera o currículo adaptado.
+/// `curriculo_base` é o texto base usado como entrada.
+/// `output_dir` define onde os PDFs vão ser salvos.
 pub async fn run_worker(
     conn: &Connection,
     groq: &GroqClient,
@@ -43,7 +42,7 @@ pub async fn run_worker(
     for vaga in &vagas {
         if let Err(e) = processar_vaga(conn, groq, gemini, curriculo_base, output_dir, vaga).await
         {
-            // Soft failure: log e continua com próxima vaga
+            // Falha isolada não para a fila inteira.
             eprintln!("worker: falha ao processar vaga {}: {}", vaga.id, e);
         }
     }
@@ -51,7 +50,7 @@ pub async fn run_worker(
     Ok(())
 }
 
-/// Processa uma única vaga pelo pipeline completo.
+/// Processa uma vaga do começo ao fim.
 async fn processar_vaga(
     conn: &Connection,
     groq: &GroqClient,
@@ -60,13 +59,13 @@ async fn processar_vaga(
     output_dir: &Path,
     vaga: &VagaPendente,
 ) -> Result<()> {
-    // ── Task 29: Triagem Groq ────────────────────────────────────────────────
+    // Triagem inicial com Groq.
     let classificacao = groq
         .classify_remote(&vaga.descricao)
         .await
         .with_context(|| format!("triagem Groq falhou para vaga {}", vaga.id))?;
 
-    // ── Modos de Triagem e Alertas ────────────────────────────────────────
+    // Trate primeiro os caminhos especiais: alerta manual ou descarte.
     if classificacao == "ALERTA_MANUAL" {
         conn.execute(
             "UPDATE Vaga_Prospectada SET status = 'ALERTA_MANUAL' WHERE id = ?1",
@@ -89,22 +88,22 @@ async fn processar_vaga(
         return Ok(());
     }
 
-    // ── Task 32: Gerar currículo adaptado via Gemini ─────────────────────────
+    // Gera o currículo adaptado com Gemini.
     let raw_output = gemini
         .gerar_curriculo(curriculo_base, &vaga.descricao)
         .await
         .with_context(|| format!("geração Gemini falhou para vaga {}", vaga.id))?;
 
-    // ── Task 33: Extrair bloco Markdown limpo ────────────────────────────────
+    // Mantém apenas o bloco Markdown útil para o PDF.
     let clean_md = generator::extract_markdown_block(&raw_output);
 
-    // ── Tasks 36–37: Gerar PDF em /tmp/forja/{uuid}-cv.pdf ───────────────────
+    // Renderiza o PDF final no diretório de saída.
     let pdf_path = generator::render_to_pdf(&clean_md, output_dir)
         .with_context(|| format!("geração PDF falhou para vaga {}", vaga.id))?;
 
     let pdf_path_str = pdf_path.to_string_lossy().to_string();
 
-    // ── Task 38: Registrar candidatura e atualizar status ────────────────────
+    // Registra a candidatura e atualiza o status da vaga.
     let candidatura_id = uuid::Uuid::new_v4().to_string();
     conn.execute(
         "INSERT INTO Candidatura_Forjada (id, vaga_id, curriculo_path, status)
@@ -128,7 +127,7 @@ async fn processar_vaga(
     Ok(())
 }
 
-/// Carrega todas as vagas com status PENDENTE do banco.
+/// Busca todas as vagas pendentes no banco.
 fn listar_vagas_pendentes(conn: &Connection) -> Result<Vec<VagaPendente>> {
     let mut stmt = conn
         .prepare("SELECT id, descricao FROM Vaga_Prospectada WHERE status = 'PENDENTE'")
