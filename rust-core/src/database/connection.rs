@@ -28,10 +28,13 @@ pub fn open_connection(db_path: &str, key: &str) -> Result<Connection> {
         .with_context(|| format!("falha ao abrir o banco em '{db_path}'"))?;
 
     // ── SecOps: PRAGMA key DEVE ser o primeiro comando ────────────────────────
-    // Ativa o AES-256-CBC do SQLCipher. Antes deste ponto, o arquivo é binário
-    // ilegível; após, a sessão opera sobre dados decifrados em memória.
-    conn.execute_batch(&format!("PRAGMA key = '{key}';"))
-        .context("falha ao aplicar PRAGMA key — verifique DB_ENCRYPTION_KEY")?;
+    // Sanitiza a chave escapando aspas simples (SQLite escape: ' → '').
+    // Sem isso, uma chave contendo `'` permite SQL injection arbitrário.
+    if !key.is_empty() {
+        let sanitized_key = key.replace('\'', "''");
+        conn.execute_batch(&format!("PRAGMA key = '{sanitized_key}';"))
+            .context("falha ao aplicar PRAGMA key — verifique DB_ENCRYPTION_KEY")?;
+    }
 
     // WAL permite leituras concorrentes sem travar escritas
     conn.execute_batch("PRAGMA journal_mode = WAL;")
