@@ -21,7 +21,7 @@ func NewIMAPListener() (*IMAPListener, error) {
 	addr := os.Getenv("IMAP_SERVER") + ":" + os.Getenv("IMAP_PORT")
 	
 	log.Println("IMAP: Connecting to server...")
-	// Tarefa 51: conexão IMAP com TLS seguro.
+	// Conexão IMAP com TLS seguro.
 	c, err := client.DialTLS(addr, nil)
 	if err != nil {
 		return nil, err
@@ -38,7 +38,7 @@ func NewIMAPListener() (*IMAPListener, error) {
 }
 
 // FetchUnseenEmailBodies lê o corpo textual de todos os emails não vistos.
-// Tarefa 52: extrair emails não lidos.
+// Extrai emails não lidos.
 func (l *IMAPListener) FetchUnseenEmailBodies() (map[uint32]string, error) {
 	mbox, err := l.client.Select("INBOX", false)
 	if err != nil {
