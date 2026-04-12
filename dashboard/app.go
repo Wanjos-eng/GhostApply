@@ -264,20 +264,39 @@ func NewApp() *App {
 	return &App{}
 }
 
+// GetAppDir returns the persistent configuration directory (~/.ghostapply)
+func GetAppDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = "." // fallback
+	}
+	appDir := filepath.Join(home, ".ghostapply")
+	os.MkdirAll(appDir, 0o755)
+	return appDir
+}
+
 // Executa a inicialização quando o app sobe.
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	godotenv.Load("../.env")
+	appDir := GetAppDir()
+
+	// 1. Tenta carregar o .env do desenvolvimento (pwd), se falhar usa o do usuário
+	if err := godotenv.Load("../.env"); err != nil {
+		godotenv.Load(filepath.Join(appDir, ".env")) // Se não tiver não falha catastroficamente
+	} else {
+		// Estamos num ambiente que achou o ../.env. Tentar copiar o .env pra pasta oficial caso nova
+		ensurePrivateFile(filepath.Join(appDir, ".env"))
+	}
 
 	dbPath := os.Getenv("DATABASE_URL")
 	dbKey := os.Getenv("DB_ENCRYPTION_KEY")
 
 	if dbPath == "" {
-		dbPath = "../forja_ghost.sqlite"
+		dbPath = filepath.Join(appDir, "forja_ghost.sqlite")
 	}
 
-	ensurePrivateFile("../.env")
-	ensurePrivateFile(envOrDefault("SESSION_PATH", filepath.Join("..", "session.json")))
+	ensurePrivateFile(filepath.Join(appDir, ".env"))
+	ensurePrivateFile(envOrDefault("SESSION_PATH", filepath.Join(appDir, "session.json")))
 	if dbPath != ":memory:" {
 		ensurePrivateFile(dbPath)
 	}
@@ -295,9 +314,10 @@ func (a *App) startup(ctx context.Context) {
 	if err != nil {
 		log.Printf("WAILS: falha ao abrir conexão com banco: %v\n", err)
 	} else {
-		// Garante as tabelas mínimas para a UI não quebrar no primeiro acesso.
-		_, initErr := database.Exec(`
-			CREATE TABLE IF NOT EXISTS Vaga_Prospectada (
+		// O driver sqlite3 (go-sqlite3) e o SQLCipher podem falhar em multi-statements no CREATE. 
+		// Separamos para garantir a montagem tática inicial.
+		schemas := []string{
+			`CREATE TABLE IF NOT EXISTS Vaga_Prospectada (
 				id TEXT PRIMARY KEY NOT NULL,
 				titulo TEXT NOT NULL,
 				empresa TEXT NOT NULL,
@@ -311,8 +331,9 @@ func (a *App) startup(ctx context.Context) {
 				recrutador_nome TEXT,
 				recrutador_perfil TEXT,
 				criado_em TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
-			);
-			CREATE TABLE IF NOT EXISTS Candidatura_Forjada (
+			);`,
+
+			`CREATE TABLE IF NOT EXISTS Candidatura_Forjada (
 				id TEXT PRIMARY KEY NOT NULL,
 				vaga_id TEXT NOT NULL
 					REFERENCES Vaga_Prospectada(id) ON DELETE CASCADE,
@@ -325,18 +346,23 @@ func (a *App) startup(ctx context.Context) {
 					)),
 				enviado_em TEXT,
 				criado_em TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
-			);
-			CREATE TABLE IF NOT EXISTS Email_Recrutador (
+			);`,
+			`CREATE TABLE IF NOT EXISTS Email_Recrutador (
 				id TEXT PRIMARY KEY,
 				email TEXT,
 				nome TEXT,
 				classificacao TEXT,
 				corpo TEXT
-			)
-		`)
-		if initErr != nil {
-			log.Printf("WAILS: falha ao inicializar schema do banco: %v\n", initErr)
+			);`,
 		}
+
+		for _, schema := range schemas {
+			_, initErr := database.Exec(schema)
+			if initErr != nil {
+				log.Printf("WAILS: falha ao inicializar schema: %v\n", initErr)
+			}
+		}
+
 		a.database = database
 
 		retentionDays := envIntOrDefault("DATA_RETENTION_DAYS", 90)

@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/Wanjos-eng/GhostApply/internal/db"
 	"github.com/Wanjos-eng/GhostApply/internal/domain"
@@ -33,12 +34,24 @@ func main() {
 
 func run() error {
 	// ── Etapa 1: carrega a configuração do ambiente ─────────────────────────
+	// Tenta carregar .env local, e como fallback usa o master-folder de deploy
 	if err := godotenv.Load(); err != nil {
-		log.Println("scraper: nenhum .env encontrado, usando o ambiente do sistema")
+		if home, errHome := os.UserHomeDir(); errHome == nil {
+			godotenv.Load(filepath.Join(home, ".ghostapply", ".env"))
+		} else {
+			log.Println("scraper: nenhum .env encontrado, usando o ambiente do sistema")
+		}
 	}
 
-	dbPath := mustEnv("DATABASE_URL")
-	dbKey  := mustEnv("DB_ENCRYPTION_KEY")
+	dbPath := getEnv("DATABASE_URL", "")
+	if dbPath == "" {
+		if home, errHome := os.UserHomeDir(); errHome == nil {
+			dbPath = filepath.Join(home, ".ghostapply", "forja_ghost.sqlite")
+		} else {
+			log.Fatalf("scraper: DATABASE_URL ausente e não encontrou UserHomeDir")
+		}
+	}
+	dbKey := mustEnv("DB_ENCRYPTION_KEY")
 	sessionPath := getEnv("SESSION_PATH", "session.json")
 	keywords    := getEnv("SEARCH_KEYWORDS", "golang engineer")
 	gupyBoards  := getEnv("GUPY_COMPANY_URLS", "")

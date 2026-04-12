@@ -9,6 +9,7 @@ zeroize  = { version = "1", features = ["derive"] }
 
 # Configuração: leitura do .env com fallback a variáveis de ambiente
 dotenvy  = "0.15"
+dirs     = "5.0"
 
 # Banco criptografado: SQLite + SQLCipher (AES-256) compilado estaticamente
 rusqlite = { version = "0.31", features = ["bundled-sqlcipher"] }

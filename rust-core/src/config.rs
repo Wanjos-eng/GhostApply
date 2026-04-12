@@ -39,8 +39,14 @@ impl AppConfig {
     /// `dotenvy::dotenv()` não falha se o arquivo `.env` não existir — apenas ignora.
     /// Isso permite que ambientes de CI/CD usem variáveis de ambiente sem `.env`.
     pub fn from_env() -> Result<Self> {
-        // Carrega o .env se existir; ignora a ausência do arquivo.
-        let _ = dotenvy::dotenv();
+        // Tenta carregar o .env do diretório atual. Se falhar, tenta o fallback do sistema.
+        if dotenvy::dotenv().is_err() {
+            if let Some(mut home) = dirs::home_dir() {
+                home.push(".ghostapply");
+                home.push(".env");
+                let _ = dotenvy::from_path(home);
+            }
+        }
 
         let database_url = std::env::var("DATABASE_URL")
             .context("variável de ambiente DATABASE_URL não definida")?;
