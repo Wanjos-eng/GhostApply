@@ -16,7 +16,7 @@ Interface desktop e ponte entre frontend/backend são feitas por Wails.
 
 Download da release atual:
 
-- https://github.com/Wanjos-eng/GhostApply/releases/tag/v1.0.1
+- https://github.com/Wanjos-eng/GhostApply/releases/tag/v1.0.0
 
 Arquivos disponíveis na release:
 
