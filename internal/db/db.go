@@ -1,12 +1,11 @@
-// Package db fornece uma conexão SQLite criptografada com SQLCipher (AES-256).
+// Package db fornece uma conexão SQLite local com driver puro Go.
 //
 // # Intenção
 // Centraliza o acesso ao banco para que nenhum outro pacote abra conexão bruta.
-// A chave de criptografia é aplicada pelo DSN antes de qualquer SQL ser executado.
+// O driver é puro Go para evitar dependência de CGO nos builds Windows.
 //
 // # Restrição (SecOps)
-// A chave fica embutida no DSN e nunca é guardada em campo de struct.
-// O chamador deve buscá-la no ambiente e descartá-la após Open.
+// O chamador deve buscar a configuração no ambiente e descartá-la após Open.
 package db
 
 import (
@@ -15,26 +14,25 @@ import (
 	"path/filepath"
 	"strings"
 
-	// Driver CGO: exige CGO_ENABLED=1 e libsqlcipher-dev no ambiente de build.
-	// O import em branco registra o driver "sqlite3" no database/sql.
-	_ "github.com/mattn/go-sqlite3"
+	// Driver puro Go para evitar dependência de CGO nos builds Windows.
+	_ "github.com/glebarez/go-sqlite"
 )
 
-// Open retorna uma conexão SQLite criptografada com AES-256 via SQLCipher.
+// Open retorna uma conexão SQLite local com pragmas mínimos habilitados.
 //
-// A chave entra pelo mecanismo `_pragma`, então vira a primeira operação
-// executada pelo driver, equivalente ao `PRAGMA key` do Rust.
+// O parâmetro de chave é mantido por compatibilidade com a API existente,
+// mas o driver usado não implementa criptografia nativa.
 //
-// `path` pode ser `:memory:` em testes; SQLCipher aceita chave vazia nesse caso.
+// `path` pode ser `:memory:` em testes.
 func Open(path, key string) (*sql.DB, error) {
-	baseDSN := buildSQLiteDSN(path, "")
+	baseDSN := buildSQLiteDSN(path)
 	trimmedKey := strings.TrimSpace(key)
 
 	if trimmedKey == "" {
 		return openWithDSN(path, baseDSN)
 	}
 
-	dsnWithKey := buildSQLiteDSN(path, trimmedKey)
+	dsnWithKey := buildSQLiteDSN(path)
 	db, err := openWithDSN(path, dsnWithKey)
 	if err == nil {
 		return db, nil
@@ -48,29 +46,14 @@ func Open(path, key string) (*sql.DB, error) {
 	return nil, fmt.Errorf("db.Open: with key failed: %v; plain fallback failed: %v", err, plainErr)
 }
 
-func buildSQLiteDSN(path, key string) string {
-	// O driver sqlite3 requer prefixo 'file:' e barras '/' (ToSlash) para processar os pragmas
-	// sem tratar o '?' como um caractere inválido no nome do arquivo do Windows C:\
+func buildSQLiteDSN(path string) string {
+	// O driver puro Go aceita URI file: com barras normalizadas.
 	normalizedPath := filepath.ToSlash(path)
-	trimmedKey := strings.TrimSpace(key)
-
-	if trimmedKey == "" {
-		return fmt.Sprintf(
-			"file:%s?_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)",
-			normalizedPath,
-		)
-	}
-
-	escapedKey := strings.ReplaceAll(trimmedKey, "'", "''")
-	return fmt.Sprintf(
-		"file:%s?_pragma=key('%s')&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)",
-		normalizedPath,
-		escapedKey,
-	)
+	return fmt.Sprintf("file:%s", normalizedPath)
 }
 
 func openWithDSN(path, dsn string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite3", dsn)
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("db.Open: failed to open '%s': %w", path, err)
 	}
@@ -80,6 +63,17 @@ func openWithDSN(path, dsn string) (*sql.DB, error) {
 	if err := db.Ping(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("db.Open: failed to verify connection (wrong key?): %w", err)
+	}
+
+	if _, err := db.Exec("PRAGMA foreign_keys = ON;"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("db.Open: failed to enable foreign keys: %w", err)
+	}
+	if path != ":memory:" {
+		if _, err := db.Exec("PRAGMA journal_mode = WAL;"); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("db.Open: failed to enable WAL: %w", err)
+		}
 	}
 
 	return db, nil
