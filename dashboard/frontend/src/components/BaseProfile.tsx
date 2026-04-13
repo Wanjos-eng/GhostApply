@@ -6,11 +6,18 @@ const PROFILE_DRAFT_KEY = 'ghostapply:base-profile-draft';
 type ProfileState = {
   target_roles: string[];
   core_stack: string[];
+  suggested_keywords: string[];
+  suggested_exclude_keywords: string[];
+  suggested_seniority: string;
+  suggested_remote_policy: string;
+  suggested_sources: string[];
+  gemini_rationale: string;
   strictly_remote: boolean;
   min_salary_floor: string;
   apps_per_day: number;
   source_file: string;
   parse_status: string;
+  parse_error_message: string;
 };
 
 type PipelineStep = {
@@ -45,23 +52,47 @@ const defaultPipelineStatus: PipelineStatus = {
 const defaultProfile: ProfileState = {
   target_roles: [],
   core_stack: [],
+  suggested_keywords: [],
+  suggested_exclude_keywords: [],
+  suggested_seniority: 'any',
+  suggested_remote_policy: 'strict-remote',
+  suggested_sources: [],
+  gemini_rationale: '',
   strictly_remote: true,
   min_salary_floor: "",
-  apps_per_day: 0,
+  apps_per_day: 50,
   source_file: "",
   parse_status: "idle",
+  parse_error_message: "",
+};
+
+const clampAppsPerDay = (value: number) => {
+  if (!Number.isFinite(value)) return 50;
+  return Math.min(200, Math.max(1, Math.trunc(value)));
 };
 
 function normalizeProfileInput(raw: any, fallback: ProfileState = defaultProfile): ProfileState {
   const src = raw && typeof raw === 'object' ? raw : {};
+  const rawApps = Number(src.apps_per_day);
+  const fallbackApps = Number.isFinite(fallback.apps_per_day) ? fallback.apps_per_day : 50;
+  const normalizedApps = Number.isFinite(rawApps)
+    ? Math.min(200, Math.max(1, Math.trunc(rawApps)))
+    : Math.min(200, Math.max(1, Math.trunc(fallbackApps)));
   return {
     target_roles: Array.isArray(src.target_roles) ? src.target_roles.filter((v: unknown) => typeof v === 'string' && v.trim() !== '') : fallback.target_roles,
     core_stack: Array.isArray(src.core_stack) ? src.core_stack.filter((v: unknown) => typeof v === 'string' && v.trim() !== '') : fallback.core_stack,
+    suggested_keywords: Array.isArray(src.suggested_keywords) ? src.suggested_keywords.filter((v: unknown) => typeof v === 'string' && v.trim() !== '') : fallback.suggested_keywords,
+    suggested_exclude_keywords: Array.isArray(src.suggested_exclude_keywords) ? src.suggested_exclude_keywords.filter((v: unknown) => typeof v === 'string' && v.trim() !== '') : fallback.suggested_exclude_keywords,
+    suggested_seniority: typeof src.suggested_seniority === 'string' && src.suggested_seniority.trim() !== '' ? src.suggested_seniority : fallback.suggested_seniority,
+    suggested_remote_policy: typeof src.suggested_remote_policy === 'string' && src.suggested_remote_policy.trim() !== '' ? src.suggested_remote_policy : fallback.suggested_remote_policy,
+    suggested_sources: Array.isArray(src.suggested_sources) ? src.suggested_sources.filter((v: unknown) => typeof v === 'string' && v.trim() !== '') : fallback.suggested_sources,
+    gemini_rationale: typeof src.gemini_rationale === 'string' ? src.gemini_rationale : fallback.gemini_rationale,
     strictly_remote: typeof src.strictly_remote === 'boolean' ? src.strictly_remote : fallback.strictly_remote,
     min_salary_floor: typeof src.min_salary_floor === 'string' ? src.min_salary_floor : fallback.min_salary_floor,
-    apps_per_day: Number.isFinite(src.apps_per_day) ? Math.max(0, Number(src.apps_per_day)) : fallback.apps_per_day,
+    apps_per_day: normalizedApps,
     source_file: typeof src.source_file === 'string' ? src.source_file : fallback.source_file,
     parse_status: typeof src.parse_status === 'string' ? src.parse_status : fallback.parse_status,
+    parse_error_message: typeof src.parse_error_message === 'string' ? src.parse_error_message : fallback.parse_error_message,
   };
 }
 
@@ -80,6 +111,7 @@ function loadDraftProfile(): ProfileState {
 export function BaseProfile() {
   const [profile, setProfile] = useState<ProfileState>(loadDraftProfile);
   const contentScrollRef = useRef<HTMLDivElement | null>(null);
+  const pipelineLogRef = useRef<HTMLDivElement | null>(null);
 
   const [status, setStatus] = useState("Daemon Ready");
   const [isParsing, setIsParsing] = useState(false);
@@ -90,10 +122,37 @@ export function BaseProfile() {
   const [isStarting, setIsStarting] = useState(false);
   const [lastDraftSavedAt, setLastDraftSavedAt] = useState<string>('');
 
+  const clearGeminiDerivedFields = (prev: ProfileState): ProfileState => ({
+    ...prev,
+    target_roles: [],
+    core_stack: [],
+    suggested_keywords: [],
+    suggested_exclude_keywords: [],
+    suggested_seniority: 'any',
+    suggested_remote_policy: 'strict-remote',
+    suggested_sources: [],
+    gemini_rationale: '',
+    parse_error_message: '',
+  });
+
+  const hasParsedCV = profile.parse_status === 'parsed' && profile.source_file.trim() !== '';
+  const visibleTargetRoles = hasParsedCV ? profile.target_roles : [];
+  const visibleCoreStack = hasParsedCV ? profile.core_stack : [];
+
+  const setAppsPerDay = (value: number) => {
+    setProfile((prev) => ({ ...prev, apps_per_day: clampAppsPerDay(value) }));
+  };
+
   useEffect(() => {
     localStorage.setItem(PROFILE_DRAFT_KEY, JSON.stringify(profile));
     setLastDraftSavedAt(new Date().toLocaleTimeString());
   }, [profile]);
+
+  useEffect(() => {
+    if (profile.source_file && !cvName) {
+      setCvName(profile.source_file);
+    }
+  }, [profile.source_file, cvName]);
 
   useEffect(() => {
     let mounted = true;
@@ -151,6 +210,14 @@ export function BaseProfile() {
     };
   }, []);
 
+  useEffect(() => {
+    const logEl = pipelineLogRef.current;
+    if (!logEl) {
+      return;
+    }
+    logEl.scrollTop = logEl.scrollHeight;
+  }, [pipelineStatus.logs.length, showPipelinePanel]);
+
   const handleUploadCV = async () => {
     if (isParsing) {
       return;
@@ -163,27 +230,32 @@ export function BaseProfile() {
         const payload = parsedData as any;
         const roles = Array.isArray(payload?.target_roles) ? payload.target_roles : [];
         const stack = Array.isArray(payload?.core_stack) ? payload.core_stack : [];
+        const suggested = Array.isArray(payload?.suggested_keywords) ? payload.suggested_keywords : [];
+        const excludes = Array.isArray(payload?.suggested_exclude_keywords) ? payload.suggested_exclude_keywords : [];
         const sourceFile = typeof payload?.source_file === 'string' ? payload.source_file : '';
         const parseStatus = typeof payload?.parse_status === 'string' ? payload.parse_status : '';
+        const parseErrorMessage = typeof payload?.parse_error_message === 'string' ? payload.parse_error_message : '';
 
         if (sourceFile) {
           setCvName(sourceFile);
         }
 
-        if (roles.length > 0 || stack.length > 0) {
+        if (parseStatus === 'parsed') {
           setProfile((prev) => normalizeProfileInput(payload, prev));
-          setCvFeedback(`CV parsed successfully: ${roles.length} roles and ${stack.length} stack items detected.`);
+          setCvFeedback(`Gemini mapeou o CV: ${roles.length} roles, ${stack.length} stacks, ${suggested.length} keywords e ${excludes.length} exclusões.`);
         } else if (sourceFile && parseStatus === 'uploaded') {
-          setProfile((prev) => ({ ...prev, source_file: sourceFile, parse_status: parseStatus }));
+          setProfile((prev) => ({ ...clearGeminiDerivedFields(prev), source_file: sourceFile, parse_status: parseStatus, parse_error_message: parseErrorMessage }));
           setCvFeedback('PDF carregado com sucesso. Parsing IA não executado (verifique GEMINI_API_KEY).');
         } else if (parseStatus === 'cancelled') {
           setCvFeedback('Upload cancelado.');
         } else {
-          setCvFeedback("Não foi possível processar o PDF selecionado.");
+          setProfile((prev) => ({ ...clearGeminiDerivedFields(prev), parse_status: 'error', parse_error_message: parseErrorMessage }));
+          setCvFeedback(parseErrorMessage || "Não foi possível processar o PDF selecionado.");
         }
       }
     } catch(e) {
       console.error(e);
+      setProfile((prev) => ({ ...clearGeminiDerivedFields(prev), parse_status: 'error', parse_error_message: 'Falha inesperada na análise do PDF.' }));
       setCvFeedback("Failed to parse PDF. Please verify Gemini API key and try again.");
     } finally {
       setIsParsing(false);
@@ -197,12 +269,12 @@ export function BaseProfile() {
       return;
     }
 
-    if (profile.target_roles.length === 0) {
-      setStatus("❌ Add at least one target role before starting");
+    if (!profile.source_file) {
+      setStatus("❌ Faça upload do CV antes de iniciar");
       return;
     }
-    if (profile.core_stack.length === 0) {
-      setStatus("❌ Add at least one core stack item before starting");
+    if (profile.parse_status !== 'parsed') {
+      setStatus("❌ A análise do CV pelo Gemini precisa concluir antes de iniciar");
       return;
     }
 
@@ -227,7 +299,7 @@ export function BaseProfile() {
   };
 
   return (
-    <div className="h-full max-h-full w-full flex flex-col overflow-hidden p-8">
+    <div className="w-full h-full flex flex-col overflow-hidden p-8">
       {/* Cabeçalho da página */}
       <header className="space-y-2 shrink-0">
         <h1 className="text-4xl font-bold tracking-tight text-zinc-950 font-headline">Base Profile & Target Directives</h1>
@@ -272,7 +344,7 @@ export function BaseProfile() {
                     onClick={() => {
                       setCvName("");
                       setCvFeedback("PDF removido.");
-                      setProfile((prev) => ({ ...prev, source_file: '', parse_status: 'idle' }));
+                      setProfile((prev) => ({ ...clearGeminiDerivedFields(prev), source_file: '', parse_status: 'idle', parse_error_message: '' }));
                     }}
                     className="text-on-surface-variant hover:text-error transition-colors"
                   >
@@ -296,6 +368,64 @@ export function BaseProfile() {
               </div>
             </div>
           </div>
+
+          <div className="bg-white rounded-lg p-6 border border-outline-variant/20 shadow-sm">
+            <h3 className="text-xs font-bold uppercase tracking-widest text-on-surface-variant mb-4">Gemini Recommendations</h3>
+            {profile.parse_status === 'parsed' ? (
+              <div className="space-y-4">
+                <div>
+                  <p className="text-[11px] uppercase tracking-widest text-zinc-500 mb-2">Suggested Search Keywords</p>
+                  <div className="flex flex-wrap gap-2">
+                    {profile.suggested_keywords.length === 0 && (
+                      <span className="text-xs text-zinc-500">Sem keywords retornadas pelo Gemini.</span>
+                    )}
+                    {profile.suggested_keywords.map((keyword) => (
+                      <span key={keyword} className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 border border-emerald-200 text-emerald-700">
+                        {keyword}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <p className="text-[11px] uppercase tracking-widest text-zinc-500 mb-2">Exclude Keywords</p>
+                  <div className="flex flex-wrap gap-2">
+                    {profile.suggested_exclude_keywords.length === 0 && (
+                      <span className="text-xs text-zinc-500">Sem exclusões sugeridas.</span>
+                    )}
+                    {profile.suggested_exclude_keywords.map((keyword) => (
+                      <span key={keyword} className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-50 border border-rose-200 text-rose-700">
+                        {keyword}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div className="rounded-lg border border-zinc-200 p-3">
+                    <p className="text-[10px] uppercase tracking-widest text-zinc-500 mb-1">Seniority</p>
+                    <p className="text-sm font-semibold text-zinc-800">{profile.suggested_seniority}</p>
+                  </div>
+                  <div className="rounded-lg border border-zinc-200 p-3">
+                    <p className="text-[10px] uppercase tracking-widest text-zinc-500 mb-1">Remote Policy</p>
+                    <p className="text-sm font-semibold text-zinc-800">{profile.suggested_remote_policy}</p>
+                  </div>
+                  <div className="rounded-lg border border-zinc-200 p-3">
+                    <p className="text-[10px] uppercase tracking-widest text-zinc-500 mb-1">Sources</p>
+                    <p className="text-sm font-semibold text-zinc-800">{profile.suggested_sources.length > 0 ? profile.suggested_sources.join(', ') : 'all'}</p>
+                  </div>
+                </div>
+                <div>
+                  <p className="text-[11px] uppercase tracking-widest text-zinc-500 mb-2">Rationale</p>
+                  <p className="text-sm text-zinc-700 leading-relaxed">
+                    {profile.gemini_rationale || 'Gemini não retornou justificativa textual.'}
+                  </p>
+                </div>
+              </div>
+            ) : profile.parse_status === 'error' ? (
+              <p className="text-sm text-rose-700">{profile.parse_error_message || 'Falha ao analisar o CV com a API.'}</p>
+            ) : (
+              <p className="text-sm text-zinc-500">As recomendações aparecem automaticamente aqui assim que o CV for inserido e analisado.</p>
+            )}
+          </div>
         </section>
 
         {/* Painel direito: regras de automação */}
@@ -311,72 +441,41 @@ export function BaseProfile() {
               <div className="space-y-4">
                 <div className="flex justify-between items-end">
                    <label className="text-xs font-bold uppercase tracking-widest text-on-surface-variant">Target Roles</label>
-                   <span className="text-[10px] text-zinc-400 font-mono">{profile.target_roles.length} selected roles</span>
+                   <span className="text-[10px] text-zinc-400 font-mono">{visibleTargetRoles.length} selected roles</span>
                 </div>
                 
                 {/* Campo visual para as funções alvo */}
                 <div className="flex flex-wrap gap-2 p-3 bg-surface-container-low border border-outline-variant/20 rounded-xl min-h-[56px] focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/50 transition-all">
-                  {profile.target_roles.map(r => (
+                  {visibleTargetRoles.map(r => (
                     <span key={r} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white shadow-sm border border-outline-variant/50 rounded-full text-xs font-semibold animate-in fade-in zoom-in duration-200">
                       {r}
-                      <span className="material-symbols-outlined text-[14px] text-zinc-400 hover:text-error cursor-pointer transition-colors" onClick={() => setProfile({...profile, target_roles: profile.target_roles.filter(x => x !== r)})}>cancel</span>
                     </span>
                   ))}
-                  <input className="bg-transparent border-none outline-none focus:ring-0 text-sm flex-1 min-w-[120px]" placeholder="Type & press Enter..." list="roles-suggestions" onKeyDown={e => {
-                    if (e.key === 'Enter' && e.currentTarget.value.trim()) {
-                      const val = e.currentTarget.value.trim();
-                      if(!profile.target_roles.includes(val)) setProfile({...profile, target_roles: [...profile.target_roles, val]});
-                      e.currentTarget.value = '';
-                    }
-                  }}/>
-                  <datalist id="roles-suggestions">
-                     {["Software Engineer", "Backend Developer", "Frontend Developer", "Fullstack Developer", "DevOps Engineer", "Cloud Architect"].map(r => <option key={r} value={r}/>)}
-                  </datalist>
+                  {visibleTargetRoles.length === 0 && (
+                    <span className="text-xs text-zinc-500">Sem dados. Faça upload do curriculo e aguarde a resposta da API para preencher automaticamente.</span>
+                  )}
                 </div>
-
-                {/* Sugestões rápidas */}
-                <div className="flex flex-wrap gap-2 mt-2">
-                   {["Backend Engineer", "Tech Lead", "Data Engineer"].filter(r => !profile.target_roles.includes(r)).map(sug => (
-                      <button type="button" key={sug} onClick={() => setProfile({...profile, target_roles: [...profile.target_roles, sug]})} className="inline-flex items-center gap-1 px-3 py-1 bg-zinc-50 hover:bg-zinc-100 border border-dashed border-zinc-300 rounded-full text-[11px] text-zinc-500 font-medium transition-colors">
-                         <span className="material-symbols-outlined text-[12px]">add</span> {sug}
-                      </button>
-                   ))}
-                </div>
+                <p className="text-[11px] text-zinc-500">Preenchido automaticamente pelo Gemini ao inserir o curriculo.</p>
               </div>
 
               {/* Stack principal */}
               <div className="space-y-4">
                 <div className="flex justify-between items-end">
                    <label className="text-xs font-bold uppercase tracking-widest text-on-surface-variant">Core Stack</label>
-                   <span className="text-[10px] text-zinc-400 font-mono">{profile.core_stack.length} technologies</span>
+                   <span className="text-[10px] text-zinc-400 font-mono">{visibleCoreStack.length} technologies</span>
                 </div>
                 
                 <div className="flex flex-wrap gap-2 p-3 bg-surface-container-low border border-outline-variant/20 rounded-xl min-h-[56px] focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/50 transition-all">
-                  {profile.core_stack.map(s => (
+                  {visibleCoreStack.map(s => (
                     <span key={s} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-zinc-900 border border-zinc-950 shadow-sm text-white rounded-full text-xs font-semibold animate-in fade-in zoom-in duration-200">
                       {s}
-                      <span className="material-symbols-outlined text-[14px] text-zinc-400 hover:text-white cursor-pointer transition-colors" onClick={() => setProfile({...profile, core_stack: profile.core_stack.filter(x => x !== s)})}>cancel</span>
                     </span>
                   ))}
-                  <input className="bg-transparent border-none outline-none focus:ring-0 text-sm flex-1 min-w-[120px]" placeholder="Add languages, frameworks..." list="stack-suggestions" onKeyDown={e => {
-                    if (e.key === 'Enter' && e.currentTarget.value.trim()) {
-                      const val = e.currentTarget.value.trim();
-                      if(!profile.core_stack.includes(val)) setProfile({...profile, core_stack: [...profile.core_stack, val]});
-                      e.currentTarget.value = '';
-                    }
-                  }}/>
-                  <datalist id="stack-suggestions">
-                     {["JavaScript", "TypeScript", "Python", "Java", "Go", "Rust", "C#", "React", "Node.js", "AWS", "Docker", "Kubernetes"].map(r => <option key={r} value={r}/>)}
-                  </datalist>
+                  {visibleCoreStack.length === 0 && (
+                    <span className="text-xs text-zinc-500">Sem dados. O Core Stack aparece somente após análise valida da API.</span>
+                  )}
                 </div>
-
-                <div className="flex flex-wrap gap-2 mt-2">
-                   {["Go", "Rust", "React", "Docker", "AWS"].filter(r => !profile.core_stack.includes(r)).map(sug => (
-                      <button type="button" key={sug} onClick={() => setProfile({...profile, core_stack: [...profile.core_stack, sug]})} className="inline-flex items-center gap-1 px-3 py-1 bg-indigo-50 hover:bg-indigo-100 border border-dashed border-indigo-200 rounded-full text-[11px] text-indigo-600 font-medium transition-colors">
-                         <span className="material-symbols-outlined text-[12px]">add</span> {sug}
-                      </button>
-                   ))}
-                </div>
+                <p className="text-[11px] text-zinc-500">Gerado automaticamente a partir da analise do CV feita pelo Gemini.</p>
               </div>
 
               <hr className="border-outline-variant/10" />
@@ -415,15 +514,39 @@ export function BaseProfile() {
                        <span className="text-2xl font-black font-mono text-zinc-900 leading-none">{profile.apps_per_day}</span>
                    </div>
                    
-                   <div className="pt-4 pb-2">
+                   <div className="pt-4 pb-2 space-y-3">
                       <input 
                         type="range" 
                         min="1" 
                         max="200" 
                         value={profile.apps_per_day} 
-                        onChange={e => setProfile({...profile, apps_per_day: parseInt(e.target.value)})} 
+                        onChange={e => setAppsPerDay(Number(e.target.value))}
                         className="w-full h-2 bg-surface-container-highest rounded-lg appearance-none cursor-pointer accent-primary" 
                       />
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setAppsPerDay(profile.apps_per_day - 1)}
+                          className="px-3 py-1.5 rounded-lg border border-zinc-200 bg-white text-zinc-700 text-xs font-bold"
+                        >
+                          -1
+                        </button>
+                        <input
+                          type="number"
+                          min={1}
+                          max={200}
+                          value={profile.apps_per_day}
+                          onChange={(e) => setAppsPerDay(Number(e.target.value))}
+                          className="w-24 px-3 py-1.5 rounded-lg border border-zinc-200 bg-white text-zinc-900 text-sm font-mono"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setAppsPerDay(profile.apps_per_day + 1)}
+                          className="px-3 py-1.5 rounded-lg border border-zinc-200 bg-white text-zinc-700 text-xs font-bold"
+                        >
+                          +1
+                        </button>
+                      </div>
                    </div>
                    <div className="flex justify-between text-[10px] font-bold text-zinc-400 font-mono">
                       <span>1</span>
@@ -513,7 +636,7 @@ export function BaseProfile() {
 
               <div className="p-6">
                 <p className="text-xs font-bold uppercase tracking-widest text-zinc-500 mb-3">Activity Log</p>
-                <div className="h-72 overflow-y-auto rounded-lg border border-zinc-200 bg-zinc-950 text-zinc-100 p-3 font-mono text-xs leading-5 space-y-1">
+                <div ref={pipelineLogRef} className="h-72 overflow-y-auto rounded-lg border border-zinc-200 bg-zinc-950 text-zinc-100 p-3 font-mono text-xs leading-5 space-y-1">
                   {pipelineStatus.logs.length === 0 && <p className="text-zinc-400">Sem eventos ainda...</p>}
                   {pipelineStatus.logs.map((line, idx) => (
                     <p key={`${line}-${idx}`}>{line}</p>
