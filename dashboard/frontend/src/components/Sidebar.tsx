@@ -9,29 +9,66 @@ interface SidebarProps {
 
 interface SystemStatus {
   database: string;
+  database_detail: string;
+  database_path: string;
   cohere: string;
   groq: string;
   gemini: string;
   imap: string;
 }
 
+const defaultSystemStatus: SystemStatus = {
+  database: "...",
+  database_detail: "Aguardando diagnóstico...",
+  database_path: "",
+  cohere: "...",
+  groq: "...",
+  gemini: "...",
+  imap: "..."
+};
+
+function normalizeSystemStatus(raw: unknown): SystemStatus {
+  if (!raw || typeof raw !== 'object') {
+    return defaultSystemStatus;
+  }
+
+  const obj = raw as Record<string, unknown>;
+  const pick = (key: keyof SystemStatus) => {
+    const value = obj[key];
+    return typeof value === 'string' && value.trim() !== '' ? value : defaultSystemStatus[key];
+  };
+
+  return {
+    database: pick('database'),
+    database_detail: pick('database_detail'),
+    database_path: pick('database_path'),
+    cohere: pick('cohere'),
+    groq: pick('groq'),
+    gemini: pick('gemini'),
+    imap: pick('imap')
+  };
+}
+
 export function Sidebar({ activeScreen, setActiveScreen }: SidebarProps) {
-  const [systemStatus, setSystemStatus] = useState<SystemStatus>({
-    database: "...",
-    cohere: "...",
-    groq: "...",
-    gemini: "...",
-    imap: "..."
-  });
+  const [systemStatus, setSystemStatus] = useState<SystemStatus>(defaultSystemStatus);
 
   useEffect(() => {
+    let inFlight = false;
+
     const fetchSystemStatus = async () => {
+      if (inFlight) {
+        return;
+      }
       if ((window as any).go?.main?.App?.GetSystemStatus) {
         try {
+          inFlight = true;
           const status = await (window as any).go.main.App.GetSystemStatus();
-          setSystemStatus(status);
+          setSystemStatus(normalizeSystemStatus(status));
         } catch (err) {
           console.error("Error loading system status:", err);
+          setSystemStatus(defaultSystemStatus);
+        } finally {
+          inFlight = false;
         }
       }
     };
@@ -85,6 +122,14 @@ export function Sidebar({ activeScreen, setActiveScreen }: SidebarProps) {
               <span className="text-zinc-500">DB</span>
               <span className="text-blue-600 font-semibold">{systemStatus.database}</span>
             </div>
+            <div className="text-[0.58rem] leading-tight text-zinc-500 font-mono mt-1 break-words">
+              {systemStatus.database_detail}
+            </div>
+            {systemStatus.database_path && (
+              <div className="text-[0.55rem] leading-tight text-zinc-400 font-mono break-all">
+                {systemStatus.database_path}
+              </div>
+            )}
             <div className="flex justify-between text-[0.65rem] font-mono">
               <span className="text-zinc-500">Cohere</span>
               <span className="text-blue-600 font-semibold">{systemStatus.cohere}</span>
