@@ -15,24 +15,24 @@ function App() {
   return (
     <div className="flex h-screen w-full overflow-hidden bg-[#f9f9f9] text-[#1a1c1c] font-sans">
       <Sidebar activeScreen={activeScreen} setActiveScreen={setActiveScreen} />
-      <main className="flex-1 flex flex-col min-w-0 h-screen">
+      <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <TopAppBar />
-        <div className={isActive('dashboard') ? 'flex-1 min-h-0' : 'hidden'}>
+        <div className={isActive('dashboard') ? 'flex-1 overflow-y-auto overflow-x-hidden' : 'hidden'}>
           <DashboardView />
         </div>
-        <div className={isActive('history') ? 'flex-1 min-h-0' : 'hidden'}>
+        <div className={isActive('history') ? 'flex-1 overflow-y-auto overflow-x-hidden' : 'hidden'}>
           <HistoryView />
         </div>
-        <div className={isActive('prospected') ? 'flex-1 min-h-0' : 'hidden'}>
+        <div className={isActive('prospected') ? 'flex-1 overflow-y-auto overflow-x-hidden' : 'hidden'}>
           <ProspectedJobsView />
         </div>
-        <div className={isActive('profile') ? 'flex-1 min-h-0' : 'hidden'}>
+        <div className={isActive('profile') ? 'flex-1 overflow-y-auto overflow-x-hidden' : 'hidden'}>
           <BaseProfile />
         </div>
-        <div className={isActive('reports') ? 'flex-1 min-h-0' : 'hidden'}>
+        <div className={isActive('reports') ? 'flex-1 overflow-y-auto overflow-x-hidden' : 'hidden'}>
           <DossierReports />
         </div>
-        <div className={isActive('settings') ? 'flex-1 min-h-0' : 'hidden'}>
+        <div className={isActive('settings') ? 'flex-1 overflow-y-auto overflow-x-hidden' : 'hidden'}>
           <Settings />
         </div>
       </main>
