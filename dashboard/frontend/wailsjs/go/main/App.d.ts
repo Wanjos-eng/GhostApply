@@ -14,6 +14,8 @@ export function GenerateOutreachMessage(arg1:string,arg2:string):Promise<string>
 
 export function GerarDossieEstudos(arg1:string):Promise<string>;
 
+export function GetAutomationPipelineStatus():Promise<main.PipelineStatusDTO>;
+
 export function GetProspectedMetrics():Promise<main.ProspectedMetricsDTO>;
 
 export function GetSystemStatus():Promise<Record<string, any>>;
@@ -23,6 +25,8 @@ export function LoadSettings():Promise<main.SettingsDTO>;
 export function RunPerformanceSuite():Promise<main.PerformanceSuiteDTO>;
 
 export function SaveSettings(arg1:main.SettingsDTO):Promise<boolean>;
+
+export function StartAutomationPipeline(arg1:main.ProfileDTO):Promise<boolean>;
 
 export function StartDaemon(arg1:main.ProfileDTO):Promise<boolean>;
 
