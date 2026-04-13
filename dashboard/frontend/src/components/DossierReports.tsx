@@ -73,7 +73,7 @@ export function DossierReports() {
   };
 
   return (
-    <div className="flex-1 flex flex-col h-full overflow-hidden bg-white w-full">
+    <div className="w-full h-full flex flex-col overflow-hidden bg-white">
       {/* Cabeçalho contextual da tela de dossiês. */}
       <div className="flex items-center justify-between px-10 py-6 shrink-0 border-b border-zinc-100">
         <div className="flex items-center gap-2 text-on-surface-variant">
