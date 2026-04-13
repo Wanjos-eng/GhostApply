@@ -25,6 +25,14 @@ interface ProspectedMetricsDTO {
 
 const sourceOrder = ['linkedin', 'gupy', 'greenhouse', 'lever', 'other'];
 
+const formatCreatedAt = (value: string) => {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return 'Unknown date';
+  }
+  return parsed.toLocaleString('pt-BR');
+};
+
 export function ProspectedJobsView() {
   const [jobs, setJobs] = useState<ProspectedJobDTO[]>([]);
   const [metrics, setMetrics] = useState<ProspectedMetricsDTO | null>(null);
@@ -70,7 +78,7 @@ export function ProspectedJobsView() {
   }, [metrics]);
 
   return (
-    <div className="flex-1 overflow-y-auto p-8 bg-[#f9f9f9] space-y-8">
+    <div className="w-full h-full p-8 bg-[#f9f9f9] space-y-8">
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
         <div>
           <h1 className="text-3xl font-extrabold text-[#1a1c1c] tracking-tight">Prospected Jobs</h1>
@@ -158,7 +166,7 @@ export function ProspectedJobsView() {
                 </div>
                 <h3 className="font-semibold text-sm text-zinc-900 line-clamp-2">{job.titulo || 'Untitled role'}</h3>
                 <p className="text-xs text-zinc-500 mt-1 truncate">{job.empresa || 'Unknown company'}</p>
-                <p className="text-[11px] text-zinc-400 mt-4">{new Date(job.criado_em).toLocaleString('en-US')}</p>
+                <p className="text-[11px] text-zinc-400 mt-4">{formatCreatedAt(job.criado_em)}</p>
               </a>
             ))
           )}
