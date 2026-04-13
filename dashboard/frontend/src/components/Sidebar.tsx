@@ -75,7 +75,15 @@ export function Sidebar({ activeScreen, setActiveScreen }: SidebarProps) {
 
     fetchSystemStatus();
     const interval = setInterval(fetchSystemStatus, 30000); // Atualiza a cada 30s.
-    return () => clearInterval(interval);
+    const onSettingsSaved = () => {
+      fetchSystemStatus();
+    };
+    window.addEventListener('ghostapply:settings-saved', onSettingsSaved);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('ghostapply:settings-saved', onSettingsSaved);
+    };
   }, []);
 
   const getNavClass = (screen: string) => {
