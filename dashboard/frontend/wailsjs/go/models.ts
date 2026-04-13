@@ -140,11 +140,18 @@ export namespace main {
 	export class ProfileDTO {
 	    target_roles: string[];
 	    core_stack: string[];
+	    suggested_keywords: string[];
+	    suggested_exclude_keywords: string[];
+	    suggested_seniority: string;
+	    suggested_remote_policy: string;
+	    suggested_sources: string[];
+	    gemini_rationale: string;
 	    strictly_remote: boolean;
 	    min_salary_floor: string;
 	    apps_per_day: number;
 	    source_file: string;
 	    parse_status: string;
+	    parse_error_message: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ProfileDTO(source);
@@ -154,11 +161,18 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.target_roles = source["target_roles"];
 	        this.core_stack = source["core_stack"];
+	        this.suggested_keywords = source["suggested_keywords"];
+	        this.suggested_exclude_keywords = source["suggested_exclude_keywords"];
+	        this.suggested_seniority = source["suggested_seniority"];
+	        this.suggested_remote_policy = source["suggested_remote_policy"];
+	        this.suggested_sources = source["suggested_sources"];
+	        this.gemini_rationale = source["gemini_rationale"];
 	        this.strictly_remote = source["strictly_remote"];
 	        this.min_salary_floor = source["min_salary_floor"];
 	        this.apps_per_day = source["apps_per_day"];
 	        this.source_file = source["source_file"];
 	        this.parse_status = source["parse_status"];
+	        this.parse_error_message = source["parse_error_message"];
 	    }
 	}
 	export class ProspectedJobDTO {
@@ -223,6 +237,11 @@ export namespace main {
 	    imap_server: string;
 	    imap_user: string;
 	    imap_pass: string;
+	    search_keywords: string;
+	    search_country: string;
+	    gupy_company_urls: string;
+	    greenhouse_boards: string;
+	    lever_companies: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new SettingsDTO(source);
@@ -237,6 +256,11 @@ export namespace main {
 	        this.imap_server = source["imap_server"];
 	        this.imap_user = source["imap_user"];
 	        this.imap_pass = source["imap_pass"];
+	        this.search_keywords = source["search_keywords"];
+	        this.search_country = source["search_country"];
+	        this.gupy_company_urls = source["gupy_company_urls"];
+	        this.greenhouse_boards = source["greenhouse_boards"];
+	        this.lever_companies = source["lever_companies"];
 	    }
 	}
 	export class VagaHistoricoDTO {
