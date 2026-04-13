@@ -19,9 +19,9 @@ import (
 	"time"
 
 	"github.com/emersion/go-imap/client"
+	_ "github.com/glebarez/go-sqlite"
 	"github.com/joho/godotenv"
 	"github.com/ledongthuc/pdf"
-	_ "github.com/mattn/go-sqlite3"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -530,60 +530,38 @@ func diagnoseDatabaseStatus(database *sql.DB, dbPath, startupErr string) (string
 }
 
 func openDashboardDatabase(dbPath, dbKey string) (*sql.DB, error) {
-	baseDSN := buildDashboardSQLiteDSN(dbPath, "")
-	dsnWithKey := buildDashboardSQLiteDSN(dbPath, dbKey)
-
-	database, err := sql.Open("sqlite3", dsnWithKey)
-	if err == nil {
-		err = database.Ping()
-	}
-	if err == nil {
-		return database, nil
+	baseDSN := buildDashboardSQLiteDSN(dbPath)
+	database, err := sql.Open("sqlite", baseDSN)
+	if err != nil {
+		return nil, fmt.Errorf("openDashboardDatabase: %w", err)
 	}
 
-	if database != nil {
+	if err := database.Ping(); err != nil {
 		_ = database.Close()
+		return nil, fmt.Errorf("openDashboardDatabase: ping failed: %w", err)
 	}
 
-	if strings.TrimSpace(dbKey) == "" {
-		return nil, err
+	if _, err := database.Exec("PRAGMA foreign_keys = ON;"); err != nil {
+		_ = database.Close()
+		return nil, fmt.Errorf("openDashboardDatabase: enable foreign keys: %w", err)
+	}
+	if dbPath != ":memory:" {
+		if _, err := database.Exec("PRAGMA journal_mode = WAL;"); err != nil {
+			_ = database.Close()
+			return nil, fmt.Errorf("openDashboardDatabase: enable WAL: %w", err)
+		}
 	}
 
-	// Fallback para ambientes onde o binário foi compilado sem SQLCipher.
-	plainDB, plainErr := sql.Open("sqlite3", baseDSN)
-	if plainErr == nil {
-		plainErr = plainDB.Ping()
-	}
-	if plainErr == nil {
-		log.Printf("WAILS: aviso — fallback para SQLite sem key pragma em %s", dbPath)
-		return plainDB, nil
-	}
-	if plainDB != nil {
-		_ = plainDB.Close()
+	if strings.TrimSpace(dbKey) != "" {
+		log.Printf("WAILS: aviso — DB_ENCRYPTION_KEY configurada, mas o driver atual usa SQLite puro sem criptografia")
 	}
 
-	return nil, fmt.Errorf("open with key failed: %v; fallback plain failed: %v", err, plainErr)
+	return database, nil
 }
 
-func buildDashboardSQLiteDSN(dbPath, dbKey string) string {
+func buildDashboardSQLiteDSN(dbPath string) string {
 	normalizedPath := strings.ReplaceAll(filepath.ToSlash(dbPath), "\\", "/")
-
-	base := fmt.Sprintf(
-		"file:%s?_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)",
-		normalizedPath,
-	)
-
-	trimmedKey := strings.TrimSpace(dbKey)
-	if trimmedKey == "" {
-		return base
-	}
-
-	escapedKey := strings.ReplaceAll(trimmedKey, "'", "''")
-	return fmt.Sprintf(
-		"file:%s?_pragma=key('%s')&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)",
-		normalizedPath,
-		escapedKey,
-	)
+	return fmt.Sprintf("file:%s", normalizedPath)
 }
 
 // Executa a inicialização quando o app sobe.
@@ -641,7 +619,7 @@ func (a *App) startup(ctx context.Context) {
 		a.databaseStartupErr = shortenErr(err)
 		log.Printf("WAILS: falha ao abrir conexão com banco: %v\n", err)
 	} else {
-		// O driver sqlite3 (go-sqlite3) e o SQLCipher podem falhar em multi-statements no CREATE.
+		// O driver SQLite puro Go pode falhar em multi-statements no CREATE.
 		// Separamos para garantir a montagem tática inicial.
 		schemas := []string{
 			`CREATE TABLE IF NOT EXISTS Vaga_Prospectada (
