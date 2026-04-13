@@ -256,8 +256,10 @@ func runRetentionPolicies(database *sql.DB, now time.Time, retentionDays int, ma
 
 // Estrutura principal da aplicação Wails.
 type App struct {
-	ctx      context.Context
-	database *sql.DB
+	ctx                context.Context
+	database           *sql.DB
+	databasePath       string
+	databaseStartupErr string
 }
 
 // Cria a instância principal do app.
@@ -469,6 +471,64 @@ func mirrorSQLiteArtifacts(srcMainDBPath, dstMainDBPath string) {
 	}
 }
 
+func canWriteInDir(dir string) bool {
+	trimmed := strings.TrimSpace(dir)
+	if trimmed == "" {
+		return false
+	}
+	tmpFile, err := os.CreateTemp(trimmed, "ghostapply-write-check-*.tmp")
+	if err != nil {
+		return false
+	}
+	name := tmpFile.Name()
+	_ = tmpFile.Close()
+	_ = os.Remove(name)
+	return true
+}
+
+func shortenErr(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := strings.TrimSpace(err.Error())
+	if len(msg) > 180 {
+		return msg[:180] + "..."
+	}
+	return msg
+}
+
+func diagnoseDatabaseStatus(database *sql.DB, dbPath, startupErr string) (string, string) {
+	if database == nil {
+		if strings.TrimSpace(startupErr) != "" {
+			return "✗ ERRO", "Falha na inicialização do banco: " + startupErr
+		}
+		return "✗ ERRO", "Conexão de banco indisponível"
+	}
+
+	if pingErr := database.Ping(); pingErr != nil {
+		return "✗ ERRO", "Falha no ping do banco: " + shortenErr(pingErr)
+	}
+
+	if strings.TrimSpace(dbPath) == "" || dbPath == ":memory:" {
+		return "✓ OK", "Banco em memória ou caminho não persistente"
+	}
+
+	info, statErr := os.Stat(dbPath)
+	if statErr != nil {
+		return "✗ ERRO", "Arquivo do banco não encontrado/acessível: " + shortenErr(statErr)
+	}
+	if info.IsDir() {
+		return "✗ ERRO", "O caminho do banco aponta para um diretório, não para arquivo"
+	}
+
+	dir := filepath.Dir(dbPath)
+	if !canWriteInDir(dir) {
+		return "⚠ LIMITADO", "Diretório do banco sem permissão de escrita (WAL pode falhar)"
+	}
+
+	return "✓ OK", "Banco acessível e diretório com escrita OK"
+}
+
 func openDashboardDatabase(dbPath, dbKey string) (*sql.DB, error) {
 	baseDSN := buildDashboardSQLiteDSN(dbPath, "")
 	dsnWithKey := buildDashboardSQLiteDSN(dbPath, dbKey)
@@ -541,6 +601,8 @@ func (a *App) startup(ctx context.Context) {
 
 	dbPath := resolvePreferredDatabasePath(os.Getenv("DATABASE_URL"), appDir)
 	dbKey := os.Getenv("DB_ENCRYPTION_KEY")
+	a.databasePath = dbPath
+	a.databaseStartupErr = ""
 	_ = os.Setenv("DATABASE_URL", dbPath)
 
 	sessionPath := envOrDefault("SESSION_PATH", "session.json")
@@ -576,6 +638,7 @@ func (a *App) startup(ctx context.Context) {
 	}
 
 	if err != nil {
+		a.databaseStartupErr = shortenErr(err)
 		log.Printf("WAILS: falha ao abrir conexão com banco: %v\n", err)
 	} else {
 		// O driver sqlite3 (go-sqlite3) e o SQLCipher podem falhar em multi-statements no CREATE.
@@ -913,21 +976,19 @@ Conteúdo do Email de Entrevista:
 // Verifica a saúde das integrações usadas pelo dashboard.
 func (a *App) GetSystemStatus() map[string]interface{} {
 	status := map[string]interface{}{
-		"database": "✓ OK",
-		"cohere":   "✗ OFFLINE",
-		"groq":     "✗ OFFLINE",
-		"gemini":   "✗ OFFLINE",
-		"imap":     "✗ OFFLINE",
+		"database":        "✓ OK",
+		"database_detail": "",
+		"database_path":   a.databasePath,
+		"cohere":          "✗ OFFLINE",
+		"groq":            "✗ OFFLINE",
+		"gemini":          "✗ OFFLINE",
+		"imap":            "✗ OFFLINE",
 	}
 
-	// Banco local
-	if a.database != nil {
-		if err := a.database.Ping(); err != nil {
-			status["database"] = "✗ ERRO"
-		}
-	} else {
-		status["database"] = "✗ ERRO"
-	}
+	// Banco local com diagnóstico detalhado para facilitar troubleshooting na sidebar.
+	dbState, dbDetail := diagnoseDatabaseStatus(a.database, a.databasePath, a.databaseStartupErr)
+	status["database"] = dbState
+	status["database_detail"] = dbDetail
 
 	// Cohere
 	cohere := NewCohereClient()
