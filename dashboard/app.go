@@ -350,6 +350,45 @@ func (a *App) setPipelineStepLocked(stepID, status, detail string) {
 	}
 }
 
+// findProjectRoot walks upward from startDir until it finds a directory that
+// contains the given sentinel sub-path (file or directory).  Returns the
+// absolute path of the matching directory, or "" if none is found.
+func findProjectRoot(startDir, sentinel string) string {
+	dir := startDir
+	for {
+		if _, err := os.Stat(filepath.Join(dir, sentinel)); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			// Reached the filesystem root without finding the sentinel.
+			break
+		}
+		dir = parent
+	}
+	return ""
+}
+
+// resolveProjectRootFor returns the absolute path of the repository root that
+// contains the given sentinelDir sub-path (e.g. "cmd/scraper").
+// It first searches upward from the running executable's directory, then from
+// the process working directory, and finally falls back to ".." (the original
+// relative-path behaviour) so that wails dev from dashboard/ still works.
+func resolveProjectRootFor(sentinelDir string) string {
+	if exePath, err := os.Executable(); err == nil {
+		if root := findProjectRoot(filepath.Dir(exePath), sentinelDir); root != "" {
+			return root
+		}
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		if root := findProjectRoot(cwd, sentinelDir); root != "" {
+			return root
+		}
+	}
+	// Last-resort: original relative-path behaviour (works when CWD=dashboard/).
+	return ".."
+}
+
 func resolveScraperCommand() (*exec.Cmd, error) {
 	exePath, err := os.Executable()
 	if err == nil {
@@ -368,8 +407,9 @@ func resolveScraperCommand() (*exec.Cmd, error) {
 	}
 
 	if _, lookErr := exec.LookPath("go"); lookErr == nil {
+		projectRoot := resolveProjectRootFor(filepath.Join("cmd", "scraper"))
 		cmd := exec.Command("go", "run", "./cmd/scraper")
-		cmd.Dir = ".."
+		cmd.Dir = projectRoot
 		return cmd, nil
 	}
 
@@ -868,6 +908,8 @@ func (a *App) StartAutomationPipeline(cfg ProfileDTO) bool {
 			detail := "Coleta falhou"
 			if strings.TrimSpace(scraperOutput) != "" {
 				detail = detail + ": " + scraperOutput
+			} else {
+				detail = detail + ": " + scraperErr.Error()
 			}
 			finishWithError("collect", detail)
 			return
@@ -918,6 +960,8 @@ func (a *App) StartAutomationPipeline(cfg ProfileDTO) bool {
 			detail := "Candidatura falhou"
 			if strings.TrimSpace(fillerOutput) != "" {
 				detail = detail + ": " + fillerOutput
+			} else {
+				detail = detail + ": " + fillerErr.Error()
 			}
 			finishWithError("apply", detail)
 			return
@@ -1004,8 +1048,9 @@ func resolveFillerCommand() (*exec.Cmd, error) {
 	}
 
 	if _, lookErr := exec.LookPath("go"); lookErr == nil {
+		projectRoot := resolveProjectRootFor(filepath.Join("cmd", "filler"))
 		cmd := exec.Command("go", "run", "./cmd/filler")
-		cmd.Dir = ".."
+		cmd.Dir = projectRoot
 		return cmd, nil
 	}
 
