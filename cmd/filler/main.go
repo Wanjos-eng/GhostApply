@@ -6,6 +6,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 
 	"github.com/Wanjos-eng/GhostApply/internal/db"
 	"github.com/Wanjos-eng/GhostApply/internal/domain"
@@ -24,22 +26,31 @@ func main() {
 func run() error {
 	// Inicializa a configuração de ambiente.
 	if err := godotenv.Load(); err != nil {
-		if home, errHome := os.UserHomeDir(); errHome == nil {
-			godotenv.Load(filepath.Join(home, ".ghostapply", ".env"))
+		if appDir, ok := loadRuntimeEnv(); ok {
+			log.Printf("filler: loaded runtime .env from %s", appDir)
 		}
 	}
 
+	appDir := runtimeAppDir()
+
 	dbPath := getEnv("DATABASE_URL", "")
 	if dbPath == "" {
-		if home, errHome := os.UserHomeDir(); errHome == nil {
-			dbPath = filepath.Join(home, ".ghostapply", "forja_ghost.sqlite")
+		if strings.TrimSpace(appDir) != "" {
+			dbPath = filepath.Join(appDir, "forja_ghost.sqlite")
 		} else {
 			log.Fatalf("filler: DATABASE_URL ausente e não encontrou UserHomeDir")
 		}
 	}
-	dbKey := mustEnv("DB_ENCRYPTION_KEY")
+	dbPath = normalizeRuntimeDataPath(dbPath, appDir)
+	dbKey := getEnv("DB_ENCRYPTION_KEY", "")
+	if strings.TrimSpace(dbKey) == "" {
+		log.Printf("filler: DB_ENCRYPTION_KEY vazio; tentando modo SQLite sem chave")
+	}
 	groqKey := mustEnv("GROQ_API_KEY")
 	sessionPath := getEnv("SESSION_PATH", "session.json")
+	if !filepath.IsAbs(sessionPath) && strings.TrimSpace(appDir) != "" {
+		sessionPath = filepath.Join(appDir, sessionPath)
+	}
 
 	// Pré-carrega o cliente Groq com a chave da sessão.
 	groqClient := llm.NewGroqClient(groqKey)
@@ -145,4 +156,67 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func runtimeAppDir() string {
+	if cfgDir, err := os.UserConfigDir(); err == nil && strings.TrimSpace(cfgDir) != "" {
+		return filepath.Join(cfgDir, "GhostApply")
+	}
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		return filepath.Join(home, ".ghostapply")
+	}
+	return ""
+}
+
+func loadRuntimeEnv() (string, bool) {
+	appDir := runtimeAppDir()
+	if strings.TrimSpace(appDir) != "" {
+		envPath := filepath.Join(appDir, ".env")
+		if err := godotenv.Load(envPath); err == nil {
+			return appDir, true
+		}
+	}
+
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		legacyDir := filepath.Join(home, ".ghostapply")
+		legacyEnvPath := filepath.Join(legacyDir, ".env")
+		if err := godotenv.Load(legacyEnvPath); err == nil {
+			return legacyDir, true
+		}
+	}
+
+	return "", false
+}
+
+func normalizeRuntimeDataPath(rawPath, appDir string) string {
+	trimmed := strings.Trim(strings.TrimSpace(rawPath), "\"'")
+	if trimmed == "" {
+		return rawPath
+	}
+	if trimmed == ":memory:" {
+		return trimmed
+	}
+
+	legacy := trimmed
+	if strings.HasPrefix(strings.ToLower(legacy), "file:") {
+		legacy = legacy[len("file:"):]
+		legacy = strings.TrimPrefix(legacy, "//")
+	}
+	if idx := strings.Index(legacy, "?"); idx >= 0 {
+		legacy = legacy[:idx]
+	}
+	if strings.TrimSpace(legacy) == "" {
+		legacy = "forja_ghost.sqlite"
+	}
+
+	isWindowsAbs := runtime.GOOS == "windows" && len(legacy) >= 3 && (legacy[1] == ':' && (legacy[2] == '\\' || legacy[2] == '/'))
+	if !filepath.IsAbs(legacy) && !isWindowsAbs && strings.TrimSpace(appDir) != "" {
+		legacy = filepath.Join(appDir, legacy)
+	}
+
+	clean := filepath.Clean(legacy)
+	if resolved, err := filepath.Abs(clean); err == nil {
+		return resolved
+	}
+	return clean
 }

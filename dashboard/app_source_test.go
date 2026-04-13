@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -96,4 +98,57 @@ func TestBuildDashboardSQLiteDSN(t *testing.T) {
 			t.Fatalf("dsn sem key deveria omitir pragma key: %q", dsn)
 		}
 	})
+}
+
+func TestResolvePreferredDatabasePathUsesLegacyWhenDefaultMissing(t *testing.T) {
+	home := t.TempDir()
+	appDir := filepath.Join(home, "GhostApply")
+	legacyDir := filepath.Join(home, ".ghostapply")
+
+	if err := os.MkdirAll(appDir, 0o755); err != nil {
+		t.Fatalf("mkdir app dir: %v", err)
+	}
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatalf("mkdir legacy dir: %v", err)
+	}
+
+	legacyDB := filepath.Join(legacyDir, "forja_ghost.sqlite")
+	if err := os.WriteFile(legacyDB, []byte("legacy"), 0o600); err != nil {
+		t.Fatalf("write legacy db: %v", err)
+	}
+
+	t.Setenv("HOME", home)
+
+	got := resolvePreferredDatabasePath("", appDir)
+	if got != legacyDB {
+		t.Fatalf("expected legacy db path %q, got %q", legacyDB, got)
+	}
+}
+
+func TestMirrorSQLiteArtifactsCopiesMainAndWalShm(t *testing.T) {
+	tmpDir := t.TempDir()
+	srcBase := filepath.Join(tmpDir, "source.sqlite")
+	dstBase := filepath.Join(tmpDir, "target.sqlite")
+
+	if err := os.WriteFile(srcBase, []byte("main"), 0o600); err != nil {
+		t.Fatalf("write src main: %v", err)
+	}
+	if err := os.WriteFile(srcBase+"-wal", []byte("wal"), 0o600); err != nil {
+		t.Fatalf("write src wal: %v", err)
+	}
+	if err := os.WriteFile(srcBase+"-shm", []byte("shm"), 0o600); err != nil {
+		t.Fatalf("write src shm: %v", err)
+	}
+
+	mirrorSQLiteArtifacts(srcBase, dstBase)
+
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		payload, err := os.ReadFile(dstBase + suffix)
+		if err != nil {
+			t.Fatalf("expected copied artifact %q: %v", dstBase+suffix, err)
+		}
+		if len(payload) == 0 {
+			t.Fatalf("copied artifact should not be empty: %q", dstBase+suffix)
+		}
+	}
 }

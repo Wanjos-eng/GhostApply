@@ -13,6 +13,7 @@ import (
 	"database/sql"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	// Driver CGO: exige CGO_ENABLED=1 e libsqlcipher-dev no ambiente de build.
 	// O import em branco registra o driver "sqlite3" no database/sql.
@@ -26,13 +27,49 @@ import (
 //
 // `path` pode ser `:memory:` em testes; SQLCipher aceita chave vazia nesse caso.
 func Open(path, key string) (*sql.DB, error) {
-	// O driver sqlite3 requer prefixo 'file:' e barras '/' (ToSlash) para processar os pragmas 
-	// sem tratar o '?' como um caractere inválido no nome do arquivo do Windows C:\
-	dsn := fmt.Sprintf(
-		"file:%s?_pragma=key('%s')&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)",
-		filepath.ToSlash(path), key,
-	)
+	baseDSN := buildSQLiteDSN(path, "")
+	trimmedKey := strings.TrimSpace(key)
 
+	if trimmedKey == "" {
+		return openWithDSN(path, baseDSN)
+	}
+
+	dsnWithKey := buildSQLiteDSN(path, trimmedKey)
+	db, err := openWithDSN(path, dsnWithKey)
+	if err == nil {
+		return db, nil
+	}
+
+	plainDB, plainErr := openWithDSN(path, baseDSN)
+	if plainErr == nil {
+		return plainDB, nil
+	}
+
+	return nil, fmt.Errorf("db.Open: with key failed: %v; plain fallback failed: %v", err, plainErr)
+}
+
+func buildSQLiteDSN(path, key string) string {
+	// O driver sqlite3 requer prefixo 'file:' e barras '/' (ToSlash) para processar os pragmas
+	// sem tratar o '?' como um caractere inválido no nome do arquivo do Windows C:\
+	normalizedPath := filepath.ToSlash(path)
+	trimmedKey := strings.TrimSpace(key)
+
+	if trimmedKey == "" {
+		return fmt.Sprintf(
+			"file:%s?_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)",
+			normalizedPath,
+		)
+	}
+
+	escapedKey := strings.ReplaceAll(trimmedKey, "'", "''")
+	return fmt.Sprintf(
+		"file:%s?_pragma=key('%s')&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)",
+		normalizedPath,
+		escapedKey,
+	)
+}
+
+func openWithDSN(path, dsn string) (*sql.DB, error) {
 	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("db.Open: failed to open '%s': %w", path, err)

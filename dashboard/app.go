@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -366,6 +367,108 @@ func normalizeDatabasePath(rawPath, appDir string) string {
 	return clean
 }
 
+func legacyDatabaseCandidates(appDir string) []string {
+	candidates := make([]string, 0, 3)
+	seen := map[string]struct{}{}
+	push := func(path string) {
+		trimmed := strings.TrimSpace(path)
+		if trimmed == "" {
+			return
+		}
+		clean := filepath.Clean(trimmed)
+		if _, ok := seen[clean]; ok {
+			return
+		}
+		seen[clean] = struct{}{}
+		candidates = append(candidates, clean)
+	}
+
+	push(filepath.Join(appDir, "forja_ghost.sqlite"))
+
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		push(filepath.Join(home, ".ghostapply", "forja_ghost.sqlite"))
+		push(filepath.Join(home, "GhostApply", "forja_ghost.sqlite"))
+	}
+
+	return candidates
+}
+
+func firstExistingFile(paths []string) string {
+	for _, p := range paths {
+		info, err := os.Stat(p)
+		if err == nil && !info.IsDir() {
+			return p
+		}
+	}
+	return ""
+}
+
+func resolvePreferredDatabasePath(rawPath, appDir string) string {
+	normalized := normalizeDatabasePath(rawPath, appDir)
+	if normalized == ":memory:" {
+		return normalized
+	}
+
+	defaultPath := filepath.Join(appDir, "forja_ghost.sqlite")
+	if normalized == defaultPath {
+		if _, err := os.Stat(normalized); err == nil {
+			return normalized
+		}
+
+		candidates := legacyDatabaseCandidates(appDir)
+		legacy := firstExistingFile(candidates)
+		if legacy != "" {
+			if legacy != normalized {
+				log.Printf("WAILS: banco legado detectado, usando %s", legacy)
+			}
+			return legacy
+		}
+	}
+
+	return normalized
+}
+
+func copyFile(srcPath, dstPath string) error {
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+
+	dst, err := os.OpenFile(dstPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	defer dst.Close()
+
+	if _, err := io.Copy(dst, src); err != nil {
+		return err
+	}
+
+	return dst.Sync()
+}
+
+func mirrorSQLiteArtifacts(srcMainDBPath, dstMainDBPath string) {
+	if strings.TrimSpace(srcMainDBPath) == "" || strings.TrimSpace(dstMainDBPath) == "" {
+		return
+	}
+	if srcMainDBPath == dstMainDBPath {
+		return
+	}
+
+	for _, ext := range []string{"", "-wal", "-shm"} {
+		src := srcMainDBPath + ext
+		dst := dstMainDBPath + ext
+		info, err := os.Stat(src)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		if err := copyFile(src, dst); err != nil {
+			log.Printf("WAILS: aviso ao copiar artefato SQLite %s -> %s: %v", src, dst, err)
+		}
+	}
+}
+
 func openDashboardDatabase(dbPath, dbKey string) (*sql.DB, error) {
 	baseDSN := buildDashboardSQLiteDSN(dbPath, "")
 	dsnWithKey := buildDashboardSQLiteDSN(dbPath, dbKey)
@@ -436,7 +539,7 @@ func (a *App) startup(ctx context.Context) {
 		_ = godotenv.Load("../.env")
 	}
 
-	dbPath := normalizeDatabasePath(os.Getenv("DATABASE_URL"), appDir)
+	dbPath := resolvePreferredDatabasePath(os.Getenv("DATABASE_URL"), appDir)
 	dbKey := os.Getenv("DB_ENCRYPTION_KEY")
 	_ = os.Setenv("DATABASE_URL", dbPath)
 
@@ -461,6 +564,9 @@ func (a *App) startup(ctx context.Context) {
 		if mkErr := os.MkdirAll(filepath.Dir(fallbackPath), 0o700); mkErr != nil {
 			log.Printf("WAILS: falha ao preparar fallback do banco: %v", mkErr)
 		}
+		// Se a origem está legível mas não gravável (ex.: Program Files no Windows),
+		// espelha o banco para o diretório gravável do usuário antes de reabrir.
+		mirrorSQLiteArtifacts(dbPath, fallbackPath)
 		database, err = openDashboardDatabase(fallbackPath, dbKey)
 		if err == nil {
 			dbPath = fallbackPath
