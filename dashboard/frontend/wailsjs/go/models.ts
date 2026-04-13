@@ -72,12 +72,79 @@ export namespace main {
 	        this.database_reachable = source["database_reachable"];
 	    }
 	}
+	export class PipelineStepDTO {
+	    id: string;
+	    title: string;
+	    status: string;
+	    detail: string;
+	    started_at: string;
+	    finished_at: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PipelineStepDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.title = source["title"];
+	        this.status = source["status"];
+	        this.detail = source["detail"];
+	        this.started_at = source["started_at"];
+	        this.finished_at = source["finished_at"];
+	    }
+	}
+	export class PipelineStatusDTO {
+	    state: string;
+	    summary: string;
+	    started_at: string;
+	    updated_at: string;
+	    finished_at: string;
+	    steps: PipelineStepDTO[];
+	    logs: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new PipelineStatusDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.state = source["state"];
+	        this.summary = source["summary"];
+	        this.started_at = source["started_at"];
+	        this.updated_at = source["updated_at"];
+	        this.finished_at = source["finished_at"];
+	        this.steps = this.convertValues(source["steps"], PipelineStepDTO);
+	        this.logs = source["logs"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
 	export class ProfileDTO {
 	    target_roles: string[];
 	    core_stack: string[];
 	    strictly_remote: boolean;
 	    min_salary_floor: string;
 	    apps_per_day: number;
+	    source_file: string;
+	    parse_status: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ProfileDTO(source);
@@ -90,6 +157,8 @@ export namespace main {
 	        this.strictly_remote = source["strictly_remote"];
 	        this.min_salary_floor = source["min_salary_floor"];
 	        this.apps_per_day = source["apps_per_day"];
+	        this.source_file = source["source_file"];
+	        this.parse_status = source["parse_status"];
 	    }
 	}
 	export class ProspectedJobDTO {
@@ -150,6 +219,7 @@ export namespace main {
 	    cohere_api_key: string;
 	    groq_api_key: string;
 	    gemini_api_key: string;
+	    ats_min_score: string;
 	    imap_server: string;
 	    imap_user: string;
 	    imap_pass: string;
@@ -163,6 +233,7 @@ export namespace main {
 	        this.cohere_api_key = source["cohere_api_key"];
 	        this.groq_api_key = source["groq_api_key"];
 	        this.gemini_api_key = source["gemini_api_key"];
+	        this.ats_min_score = source["ats_min_score"];
 	        this.imap_server = source["imap_server"];
 	        this.imap_user = source["imap_user"];
 	        this.imap_pass = source["imap_pass"];
