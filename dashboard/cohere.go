@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -35,6 +36,15 @@ type cohereChatResponse struct {
 	Text string `json:"text"`
 }
 
+func resolveCohereModel() string {
+	// command-r foi removido; permite override por env e usa fallback compatível.
+	model := strings.TrimSpace(os.Getenv("COHERE_MODEL"))
+	if model == "" {
+		model = "command-r-plus"
+	}
+	return model
+}
+
 // ClassifyEmail classifica o corpo de um email como REJEICAO, ENTREVISTA ou OUTRO.
 func (c *CohereClient) ClassifyEmail(body string) (string, error) {
 	if c.apiKey == "" {
@@ -47,7 +57,7 @@ If it's neither, classify as "OUTRO".
 Respond directly with ONLY ONE of these three strict labels: "REJEICAO", "ENTREVISTA" or "OUTRO". Do not add any punctuation.`
 
 	reqBody := cohereChatRequest{
-		Model:            "command-r", // Modelo leve e rápido para instrução curta.
+		Model:            resolveCohereModel(),
 		Message:          "Email Body:\n\n" + body,
 		PreambleOverride: preamble,
 		Temperature:      0.1,
@@ -109,7 +119,7 @@ Output ONLY the message body, no placeholders, no quotes.`
 	messagePrompt := fmt.Sprintf("Write an outreach message addressed to '%s' regarding the '%s' role.", recruiterName, roleName)
 
 	reqBody := cohereChatRequest{
-		Model:            "command-r",
+		Model:            resolveCohereModel(),
 		Message:          messagePrompt,
 		PreambleOverride: preamble,
 		Temperature:      0.4, // Leve criatividade para soar natural sem perder foco.
