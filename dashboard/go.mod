@@ -5,9 +5,9 @@ go 1.25.0
 require (
 	github.com/emersion/go-imap v1.2.1
 	github.com/emersion/go-message v0.18.0
+	github.com/glebarez/go-sqlite v1.22.0
 	github.com/joho/godotenv v1.5.1
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
-	github.com/mattn/go-sqlite3 v1.14.42
 	github.com/wailsapp/wails/v2 v2.10.2
 )
 
@@ -44,6 +44,12 @@ require (
 replace github.com/Wanjos-eng/GhostApply => ../
 
 require (
+	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/emersion/go-sasl v0.0.0-20200509203442-7bfe0ed36a21 // indirect
 	github.com/emersion/go-textwrapper v0.0.0-20200911093747-65d896831594 // indirect
+	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
+	modernc.org/libc v1.37.6 // indirect
+	modernc.org/mathutil v1.6.0 // indirect
+	modernc.org/memory v1.7.2 // indirect
+	modernc.org/sqlite v1.28.0 // indirect
 )
