@@ -1,60 +1,241 @@
-import { useState } from 'react';
-import { StartDaemon, UploadAndParseCV } from "../../wailsjs/go/main/App";
+import { useEffect, useRef, useState } from 'react';
+import { GetAutomationPipelineStatus, StartAutomationPipeline, UploadAndParseCV } from "../../wailsjs/go/main/App";
+
+const PROFILE_DRAFT_KEY = 'ghostapply:base-profile-draft';
+
+type ProfileState = {
+  target_roles: string[];
+  core_stack: string[];
+  strictly_remote: boolean;
+  min_salary_floor: string;
+  apps_per_day: number;
+  source_file: string;
+  parse_status: string;
+};
+
+type PipelineStep = {
+  id: string;
+  title: string;
+  status: string;
+  detail: string;
+  started_at: string;
+  finished_at: string;
+};
+
+type PipelineStatus = {
+  state: string;
+  summary: string;
+  started_at: string;
+  updated_at: string;
+  finished_at: string;
+  steps: PipelineStep[];
+  logs: string[];
+};
+
+const defaultPipelineStatus: PipelineStatus = {
+  state: 'idle',
+  summary: 'Pipeline parado',
+  started_at: '',
+  updated_at: '',
+  finished_at: '',
+  steps: [],
+  logs: [],
+};
+
+const defaultProfile: ProfileState = {
+  target_roles: [],
+  core_stack: [],
+  strictly_remote: true,
+  min_salary_floor: "",
+  apps_per_day: 0,
+  source_file: "",
+  parse_status: "idle",
+};
+
+function normalizeProfileInput(raw: any, fallback: ProfileState = defaultProfile): ProfileState {
+  const src = raw && typeof raw === 'object' ? raw : {};
+  return {
+    target_roles: Array.isArray(src.target_roles) ? src.target_roles.filter((v: unknown) => typeof v === 'string' && v.trim() !== '') : fallback.target_roles,
+    core_stack: Array.isArray(src.core_stack) ? src.core_stack.filter((v: unknown) => typeof v === 'string' && v.trim() !== '') : fallback.core_stack,
+    strictly_remote: typeof src.strictly_remote === 'boolean' ? src.strictly_remote : fallback.strictly_remote,
+    min_salary_floor: typeof src.min_salary_floor === 'string' ? src.min_salary_floor : fallback.min_salary_floor,
+    apps_per_day: Number.isFinite(src.apps_per_day) ? Math.max(0, Number(src.apps_per_day)) : fallback.apps_per_day,
+    source_file: typeof src.source_file === 'string' ? src.source_file : fallback.source_file,
+    parse_status: typeof src.parse_status === 'string' ? src.parse_status : fallback.parse_status,
+  };
+}
+
+function loadDraftProfile(): ProfileState {
+  try {
+    const raw = localStorage.getItem(PROFILE_DRAFT_KEY);
+    if (!raw) {
+      return defaultProfile;
+    }
+    return normalizeProfileInput(JSON.parse(raw), defaultProfile);
+  } catch {
+    return defaultProfile;
+  }
+}
 
 export function BaseProfile() {
-  const [profile, setProfile] = useState({
-    target_roles: [] as string[],
-    core_stack: [] as string[],
-    strictly_remote: true,
-    min_salary_floor: "",
-    apps_per_day: 0
-  });
+  const [profile, setProfile] = useState<ProfileState>(loadDraftProfile);
+  const contentScrollRef = useRef<HTMLDivElement | null>(null);
 
   const [status, setStatus] = useState("Daemon Ready");
   const [isParsing, setIsParsing] = useState(false);
   const [cvName, setCvName] = useState("");
+  const [cvFeedback, setCvFeedback] = useState("");
+  const [pipelineStatus, setPipelineStatus] = useState<PipelineStatus>(defaultPipelineStatus);
+  const [showPipelinePanel, setShowPipelinePanel] = useState(false);
+  const [isStarting, setIsStarting] = useState(false);
+  const [lastDraftSavedAt, setLastDraftSavedAt] = useState<string>('');
+
+  useEffect(() => {
+    localStorage.setItem(PROFILE_DRAFT_KEY, JSON.stringify(profile));
+    setLastDraftSavedAt(new Date().toLocaleTimeString());
+  }, [profile]);
+
+  useEffect(() => {
+    let mounted = true;
+    const syncPipeline = async () => {
+      try {
+        const snapshot = await GetAutomationPipelineStatus();
+        if (mounted && snapshot) {
+          setPipelineStatus(snapshot as PipelineStatus);
+        }
+      } catch (err) {
+        console.error('Pipeline status poll failed:', err);
+      }
+    };
+
+    syncPipeline();
+    const interval = setInterval(syncPipeline, 1200);
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  useEffect(() => {
+    const stabilizeScroll = () => {
+      const el = contentScrollRef.current;
+      if (!el) {
+        return;
+      }
+
+      // Reaplica overflow e limita a posição para evitar "travamento" após maximize/minimize.
+      const maxTop = Math.max(0, el.scrollHeight - el.clientHeight);
+      if (el.scrollTop > maxTop) {
+        el.scrollTop = maxTop;
+      }
+
+      el.style.overflowY = 'hidden';
+      requestAnimationFrame(() => {
+        el.style.overflowY = 'auto';
+      });
+    };
+
+    const onResize = () => {
+      requestAnimationFrame(stabilizeScroll);
+    };
+
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', onResize);
+
+    // Primeira estabilização ao montar a tela.
+    stabilizeScroll();
+
+    return () => {
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('orientationchange', onResize);
+    };
+  }, []);
 
   const handleUploadCV = async () => {
+    if (isParsing) {
+      return;
+    }
     setIsParsing(true);
+    setCvFeedback("Parsing CV with Gemini...");
     try {
       if ((window as any).go) {
         const parsedData = await UploadAndParseCV();
-        if (parsedData && parsedData.target_roles) {
-          setProfile(parsedData);
-          setCvName("Parsed_CV.pdf");
+        const payload = parsedData as any;
+        const roles = Array.isArray(payload?.target_roles) ? payload.target_roles : [];
+        const stack = Array.isArray(payload?.core_stack) ? payload.core_stack : [];
+        const sourceFile = typeof payload?.source_file === 'string' ? payload.source_file : '';
+        const parseStatus = typeof payload?.parse_status === 'string' ? payload.parse_status : '';
+
+        if (sourceFile) {
+          setCvName(sourceFile);
+        }
+
+        if (roles.length > 0 || stack.length > 0) {
+          setProfile((prev) => normalizeProfileInput(payload, prev));
+          setCvFeedback(`CV parsed successfully: ${roles.length} roles and ${stack.length} stack items detected.`);
+        } else if (sourceFile && parseStatus === 'uploaded') {
+          setProfile((prev) => ({ ...prev, source_file: sourceFile, parse_status: parseStatus }));
+          setCvFeedback('PDF carregado com sucesso. Parsing IA não executado (verifique GEMINI_API_KEY).');
+        } else if (parseStatus === 'cancelled') {
+          setCvFeedback('Upload cancelado.');
+        } else {
+          setCvFeedback("Não foi possível processar o PDF selecionado.");
         }
       }
     } catch(e) {
       console.error(e);
+      setCvFeedback("Failed to parse PDF. Please verify Gemini API key and try again.");
     } finally {
       setIsParsing(false);
     }
   };
 
   const handleStartDaemon = async () => {
-    setStatus("Starting Forge Engine...");
+    if (isStarting || pipelineStatus.state === 'running') {
+      setStatus("⏳ Pipeline já está em execução");
+      setShowPipelinePanel(true);
+      return;
+    }
+
+    if (profile.target_roles.length === 0) {
+      setStatus("❌ Add at least one target role before starting");
+      return;
+    }
+    if (profile.core_stack.length === 0) {
+      setStatus("❌ Add at least one core stack item before starting");
+      return;
+    }
+
+    setStatus("Starting automation pipeline...");
+    setShowPipelinePanel(true);
+    setIsStarting(true);
     try {
       if ((window as any).go) {
-        const success = await StartDaemon(profile);
-        if (success) setStatus("✅ Daemon Running");
-        else setStatus("❌ Failed to start engine");
+        const success = await StartAutomationPipeline(profile);
+        if (success) {
+          setStatus("✅ Pipeline iniciado. Acompanhe a execução em tempo real.");
+        } else {
+          setStatus("❌ Não foi possível iniciar o pipeline agora.");
+        }
       }
     } catch (e) {
       console.error(e);
       setStatus("❌ Critical failure");
+    } finally {
+      setIsStarting(false);
     }
   };
 
   return (
-    <div className="p-12 max-w-7xl w-full mx-auto space-y-12 overflow-y-auto">
+    <div className="h-full max-h-full w-full flex flex-col overflow-hidden p-8">
       {/* Cabeçalho da página */}
-      <header className="space-y-2">
+      <header className="space-y-2 shrink-0">
         <h1 className="text-4xl font-bold tracking-tight text-zinc-950 font-headline">Base Profile & Target Directives</h1>
         <p className="text-on-surface-variant font-body">Define your core identity and automated application constraints.</p>
       </header>
 
       {/* Conteúdo principal */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+      <div ref={contentScrollRef} className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start flex-1 min-h-0 overflow-y-auto pr-1 pb-6 mt-8">
         {/* Painel esquerdo: perfil e CV */}
         <section className="lg:col-span-5 space-y-6">
           <div className="bg-surface-container-lowest border border-outline-variant/30 rounded-lg p-8 shadow-sm">
@@ -73,6 +254,7 @@ export function BaseProfile() {
               <div className="space-y-1">
                 <p className="font-medium text-sm">{isParsing ? 'Parsing document with AI...' : 'Select your base CV (PDF)'}</p>
                 <p className="text-xs text-on-surface-variant">Max file size: 10MB</p>
+                {cvFeedback && <p className="text-xs text-blue-700">{cvFeedback}</p>}
               </div>
             </div>
             
@@ -86,7 +268,14 @@ export function BaseProfile() {
                       <span className="text-[10px] text-zinc-400 uppercase tracking-widest">AI mapped • 100%</span>
                     </div>
                   </div>
-                  <button onClick={() => setCvName("")} className="text-on-surface-variant hover:text-error transition-colors">
+                  <button
+                    onClick={() => {
+                      setCvName("");
+                      setCvFeedback("PDF removido.");
+                      setProfile((prev) => ({ ...prev, source_file: '', parse_status: 'idle' }));
+                    }}
+                    className="text-on-surface-variant hover:text-error transition-colors"
+                  >
                     <span className="material-symbols-outlined text-xl" data-icon="delete">delete</span>
                   </button>
                 </div>
@@ -267,18 +456,74 @@ export function BaseProfile() {
       </div>
 
       {/* Ação principal */}
-      <footer className="flex justify-between items-center pt-8 border-t border-outline-variant/20">
+      <footer className="flex justify-between items-center pt-6 border-t border-outline-variant/20 shrink-0 bg-[#f9f9f9]">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
             <div className={`w-2 h-2 rounded-full ${status.includes('❌') ? 'bg-error' : 'bg-green-500 animate-pulse'}`}></div>
             <span className="text-[10px] font-mono text-on-surface-variant uppercase">{status}</span>
           </div>
+          <div className="text-[10px] font-mono text-zinc-500 uppercase">
+            {lastDraftSavedAt ? `Rascunho salvo ${lastDraftSavedAt}` : 'Rascunho aguardando alterações'}
+          </div>
         </div>
-        <button onClick={handleStartDaemon} className="flex items-center gap-3 px-8 py-4 bg-zinc-950 text-white rounded-lg hover:bg-zinc-800 transition-all shadow-xl shadow-zinc-200 group">
-          <span className="font-semibold text-sm">Save & Start Daemon</span>
+        <button
+          onClick={handleStartDaemon}
+          disabled={isStarting || pipelineStatus.state === 'running'}
+          className="flex items-center gap-3 px-8 py-4 bg-zinc-950 text-white rounded-lg hover:bg-zinc-800 disabled:bg-zinc-400 disabled:cursor-not-allowed transition-all shadow-xl shadow-zinc-200 group"
+        >
+          <span className="font-semibold text-sm">{isStarting ? 'Inicializando...' : pipelineStatus.state === 'running' ? 'Pipeline em execução' : 'Iniciar Coleta + Candidatura'}</span>
           <span className="material-symbols-outlined group-hover:translate-x-1 transition-transform" data-icon="play_arrow">play_arrow</span>
         </button>
       </footer>
+
+      {showPipelinePanel && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[1px] flex items-center justify-center p-6">
+          <div className="w-full max-w-4xl bg-white rounded-xl shadow-2xl border border-zinc-200 overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-100">
+              <div>
+                <h3 className="font-headline text-lg font-bold text-zinc-900">Automation Pipeline Live</h3>
+                <p className="text-sm text-zinc-500">{pipelineStatus.summary || 'Aguardando atualização...'}</p>
+              </div>
+              <button
+                onClick={() => setShowPipelinePanel(false)}
+                className="px-3 py-1.5 text-xs font-semibold rounded bg-zinc-100 hover:bg-zinc-200 text-zinc-700"
+              >
+                Fechar
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.2fr] gap-0">
+              <div className="p-6 border-r border-zinc-100 space-y-3">
+                <p className="text-xs font-bold uppercase tracking-widest text-zinc-500">Etapas</p>
+                {pipelineStatus.steps.length === 0 && (
+                  <div className="text-sm text-zinc-500">Inicie o pipeline para ver o progresso.</div>
+                )}
+                {pipelineStatus.steps.map((step) => (
+                  <div key={step.id} className="p-3 rounded-lg border border-zinc-200 bg-zinc-50">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-semibold text-zinc-900">{step.title}</p>
+                      <span className={`text-[11px] font-bold uppercase tracking-wider ${step.status === 'done' ? 'text-green-600' : step.status === 'running' ? 'text-blue-600' : step.status === 'error' ? 'text-red-600' : 'text-zinc-500'}`}>
+                        {step.status}
+                      </span>
+                    </div>
+                    <p className="text-xs text-zinc-600 mt-1">{step.detail}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="p-6">
+                <p className="text-xs font-bold uppercase tracking-widest text-zinc-500 mb-3">Activity Log</p>
+                <div className="h-72 overflow-y-auto rounded-lg border border-zinc-200 bg-zinc-950 text-zinc-100 p-3 font-mono text-xs leading-5 space-y-1">
+                  {pipelineStatus.logs.length === 0 && <p className="text-zinc-400">Sem eventos ainda...</p>}
+                  {pipelineStatus.logs.map((line, idx) => (
+                    <p key={`${line}-${idx}`}>{line}</p>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
