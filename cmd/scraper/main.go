@@ -28,6 +28,22 @@ import (
 	"github.com/playwright-community/playwright-go"
 )
 
+type searchStrategy struct {
+	excludeKeywords map[string]struct{}
+	seniority       string
+	remotePolicy    string
+	allowedSources  map[string]struct{}
+}
+
+type strategyFilterStats struct {
+	InputCount         int
+	KeptCount          int
+	DroppedBySource    int
+	DroppedByExclude   int
+	DroppedBySeniority int
+	DroppedByRemote    int
+}
+
 func main() {
 	if err := run(); err != nil {
 		log.Fatalf("scraper: fatal error: %v", err)
@@ -65,10 +81,22 @@ func run() error {
 		sessionPath = filepath.Join(appDir, sessionPath)
 	}
 	keywords := getEnv("SEARCH_KEYWORDS", "golang engineer")
+	excludeKeywords := getEnv("SEARCH_EXCLUDE_KEYWORDS", "")
+	searchSeniority := getEnv("SEARCH_SENIORITY", "any")
+	searchRemotePolicy := getEnv("SEARCH_REMOTE_POLICY", "strict-remote")
+	searchSources := getEnv("SEARCH_SOURCES", "")
 	gupyBoards := getEnv("GUPY_COMPANY_URLS", "")
 	greenhouseBoards := getEnv("GREENHOUSE_BOARDS", "")
 	leverCompanies := getEnv("LEVER_COMPANIES", "")
 	searchCountry := getEnv("SEARCH_COUNTRY", "BR")
+	strategy := parseSearchStrategy(excludeKeywords, searchSeniority, searchRemotePolicy, searchSources)
+	log.Printf("scraper: config keywords=%q country=%q", keywords, searchCountry)
+	log.Printf("scraper: strategy seniority=%q remote=%q excludes=%d sources=%d", strategy.seniority, strategy.remotePolicy, len(strategy.excludeKeywords), len(strategy.allowedSources))
+	log.Printf("scraper: providers enabled -> linkedin=true gupy=%t greenhouse=%t lever=%t",
+		strings.TrimSpace(gupyBoards) != "",
+		strings.TrimSpace(greenhouseBoards) != "",
+		strings.TrimSpace(leverCompanies) != "",
+	)
 
 	// ── Etapa 2: abre o banco criptografado ─────────────────────────────────
 	database, err := db.Open(dbPath, dbKey)
@@ -99,7 +127,7 @@ func run() error {
 	// Injeta os cookies da sessão antes de qualquer navegação.
 	if err := LoadCookies(ctx, sessionPath); err != nil {
 		log.Printf("scraper: warning — could not load cookies from %s: %v", sessionPath, err)
-		log.Println("scraper: continuing without session (expect login wall)")
+		log.Println("scraper: continuing sem sessão; tentativa de coleta pública do LinkedIn")
 	}
 
 	page, err := ctx.NewPage()
@@ -108,20 +136,63 @@ func run() error {
 	}
 	defer page.Close()
 
-	// ── Etapa 5: navega até a busca remota do LinkedIn ──────────────────────
-	if err := NavigateToLinkedInSearch(page, keywords); err != nil {
-		return fmt.Errorf("run: %w", err)
+	vagas := make([]domain.Vaga, 0, 64)
+	linkedinQueries := buildLinkedInSearchQueries(keywords)
+	if len(linkedinQueries) == 0 {
+		linkedinQueries = []string{keywords}
 	}
 
-	// ── Etapa 6: extrai vagas do LinkedIn ────────────────────────────────────
-	vagasLinkedIn, err := ExtractVagas(page)
-	if err != nil {
-		return fmt.Errorf("run: %w", err)
-	}
-	log.Printf("scraper: %d vagas extraídas do LinkedIn", len(vagasLinkedIn))
+	collectionGoal := 100
 
-	vagas := make([]domain.Vaga, 0, len(vagasLinkedIn)+64)
-	vagas = append(vagas, vagasLinkedIn...)
+	seenLinkedIn := map[string]struct{}{}
+
+	linkedinTotal := 0
+	// ── Etapas 5 e 6: navega e extrai vagas do LinkedIn por termo ───────────
+	for _, query := range linkedinQueries {
+		query = strings.TrimSpace(query)
+		if query == "" {
+			continue
+		}
+
+		for start := 0; start < collectionGoal; start += linkedInSearchPageSize {
+			if len(vagas) >= collectionGoal {
+				break
+			}
+
+			if err := NavigateToLinkedInSearchAtOffset(page, query, start); err != nil {
+				log.Printf("scraper: aviso ao navegar LinkedIn com query %q start=%d: %v", query, start, err)
+				break
+			}
+
+			vagasLinkedIn, extractErr := ExtractVagas(page)
+			if extractErr != nil {
+				log.Printf("scraper: aviso ao extrair LinkedIn com query %q start=%d: %v", query, start, extractErr)
+				break
+			}
+			if len(vagasLinkedIn) == 0 {
+				log.Printf("scraper: 0 vagas extraídas do LinkedIn para %q start=%d", query, start)
+				break
+			}
+
+			pageAdded := 0
+			for _, vaga := range vagasLinkedIn {
+				key := dedupeKey(vaga)
+				if key == "" {
+					continue
+				}
+				if _, ok := seenLinkedIn[key]; ok {
+					continue
+				}
+				seenLinkedIn[key] = struct{}{}
+				vagas = append(vagas, vaga)
+				pageAdded++
+			}
+
+			linkedinTotal += pageAdded
+			log.Printf("scraper: %d vagas novas extraídas do LinkedIn para %q start=%d", pageAdded, query, start)
+		}
+	}
+	log.Printf("scraper: total do LinkedIn antes da persistência: %d", linkedinTotal)
 
 	if gupyBoards != "" {
 		vagasGupy, gupyErr := ExtractGupyVagas(ctx, gupyBoards, keywords, searchCountry)
@@ -131,6 +202,8 @@ func run() error {
 			vagas = append(vagas, vagasGupy...)
 			log.Printf("scraper: %d vagas extraídas da Gupy", len(vagasGupy))
 		}
+	} else {
+		log.Printf("scraper: Gupy desativado (GUPY_COMPANY_URLS vazio)")
 	}
 
 	if greenhouseBoards != "" {
@@ -141,6 +214,8 @@ func run() error {
 			vagas = append(vagas, vagasGreenhouse...)
 			log.Printf("scraper: %d vagas extraídas da Greenhouse", len(vagasGreenhouse))
 		}
+	} else {
+		log.Printf("scraper: Greenhouse desativado (GREENHOUSE_BOARDS vazio)")
 	}
 
 	if leverCompanies != "" {
@@ -151,6 +226,8 @@ func run() error {
 			vagas = append(vagas, vagasLever...)
 			log.Printf("scraper: %d vagas extraídas da Lever", len(vagasLever))
 		}
+	} else {
+		log.Printf("scraper: Lever desativado (LEVER_COMPANIES vazio)")
 	}
 
 	log.Printf("scraper: total agregado de vagas antes da persistência: %d", len(vagas))
@@ -158,7 +235,18 @@ func run() error {
 	if len(vagasDedup) != len(vagas) {
 		log.Printf("scraper: %d vagas duplicadas removidas antes de persistir", len(vagas)-len(vagasDedup))
 	}
-	vagas = vagasDedup
+	filteredVagas, strategyStats := filterVagasByStrategyWithStats(vagasDedup, strategy)
+	vagas = filteredVagas
+	log.Printf(
+		"scraper: strategy stats input=%d kept=%d dropped_source=%d dropped_exclude=%d dropped_seniority=%d dropped_remote=%d",
+		strategyStats.InputCount,
+		strategyStats.KeptCount,
+		strategyStats.DroppedBySource,
+		strategyStats.DroppedByExclude,
+		strategyStats.DroppedBySeniority,
+		strategyStats.DroppedByRemote,
+	)
+	log.Printf("scraper: total após estratégia: %d", len(vagas))
 
 	// ── Etapas 7 e 8: sanitiza e persiste ───────────────────────────────────
 	saved := 0
@@ -207,6 +295,34 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func buildLinkedInSearchQueries(raw string) []string {
+	parts := parseCSV(raw)
+	if len(parts) == 0 {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" {
+			return nil
+		}
+		return []string{trimmed}
+	}
+
+	queries := make([]string, 0, len(parts))
+	seen := map[string]struct{}{}
+	for _, part := range parts {
+		query := strings.TrimSpace(part)
+		if query == "" {
+			continue
+		}
+		key := strings.ToLower(query)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		queries = append(queries, query)
+	}
+
+	return queries
 }
 
 func runtimeAppDir() string {
@@ -270,4 +386,185 @@ func normalizeRuntimeDataPath(rawPath, appDir string) string {
 		return resolved
 	}
 	return clean
+}
+
+func parseSearchStrategy(excludeCSV, seniorityRaw, remotePolicyRaw, sourcesCSV string) searchStrategy {
+	strategy := searchStrategy{
+		excludeKeywords: map[string]struct{}{},
+		seniority:       normalizeSeniority(seniorityRaw),
+		remotePolicy:    normalizeRemotePolicy(remotePolicyRaw),
+		allowedSources:  map[string]struct{}{},
+	}
+
+	for _, term := range parseCSV(excludeCSV) {
+		normalized := strings.ToLower(strings.TrimSpace(term))
+		if normalized == "" {
+			continue
+		}
+		strategy.excludeKeywords[normalized] = struct{}{}
+	}
+
+	for _, source := range parseCSV(sourcesCSV) {
+		normalized := strings.ToLower(strings.TrimSpace(source))
+		switch normalized {
+		case "linkedin", "gupy", "greenhouse", "lever":
+			strategy.allowedSources[normalized] = struct{}{}
+		}
+	}
+
+	return strategy
+}
+
+func normalizeSeniority(raw string) string {
+	v := strings.ToLower(strings.TrimSpace(raw))
+	switch v {
+	case "junior", "mid", "senior", "staff", "lead":
+		return v
+	default:
+		return "any"
+	}
+}
+
+func normalizeRemotePolicy(raw string) string {
+	v := strings.ToLower(strings.TrimSpace(raw))
+	switch v {
+	case "any", "remote-first", "strict-remote":
+		return v
+	default:
+		return "strict-remote"
+	}
+}
+
+func filterVagasByStrategy(vagas []domain.Vaga, strategy searchStrategy) []domain.Vaga {
+	filtered, _ := filterVagasByStrategyWithStats(vagas, strategy)
+	return filtered
+}
+
+func filterVagasByStrategyWithStats(vagas []domain.Vaga, strategy searchStrategy) ([]domain.Vaga, strategyFilterStats) {
+	stats := strategyFilterStats{InputCount: len(vagas)}
+	if len(vagas) == 0 {
+		return vagas, stats
+	}
+
+	filtered := make([]domain.Vaga, 0, len(vagas))
+	for _, v := range vagas {
+		if !sourceAllowed(v, strategy.allowedSources) {
+			stats.DroppedBySource++
+			continue
+		}
+		if containsExcludedKeyword(v, strategy.excludeKeywords) {
+			stats.DroppedByExclude++
+			continue
+		}
+		if !matchesSeniorityStrategy(v, strategy.seniority) {
+			stats.DroppedBySeniority++
+			continue
+		}
+		if !matchesRemotePolicy(v, strategy.remotePolicy) {
+			stats.DroppedByRemote++
+			continue
+		}
+		filtered = append(filtered, v)
+	}
+
+	stats.KeptCount = len(filtered)
+	return filtered, stats
+}
+
+func inferVagaSource(v domain.Vaga) string {
+	blob := strings.ToLower(strings.TrimSpace(v.URL))
+	switch {
+	case strings.Contains(blob, "linkedin.com"):
+		return "linkedin"
+	case strings.Contains(blob, "gupy.io"):
+		return "gupy"
+	case strings.Contains(blob, "greenhouse.io") || strings.Contains(blob, "boards.greenhouse"):
+		return "greenhouse"
+	case strings.Contains(blob, "lever.co") || strings.Contains(blob, "jobs.lever"):
+		return "lever"
+	default:
+		return "other"
+	}
+}
+
+func sourceAllowed(v domain.Vaga, allowed map[string]struct{}) bool {
+	if len(allowed) == 0 {
+		return true
+	}
+	_, ok := allowed[inferVagaSource(v)]
+	return ok
+}
+
+func containsExcludedKeyword(v domain.Vaga, excludes map[string]struct{}) bool {
+	if len(excludes) == 0 {
+		return false
+	}
+	blob := strings.ToLower(v.Titulo + " " + v.Descricao + " " + v.Empresa)
+	for term := range excludes {
+		if term != "" && strings.Contains(blob, term) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchesSeniorityStrategy(v domain.Vaga, seniority string) bool {
+	if seniority == "any" {
+		return true
+	}
+	blob := strings.ToLower(v.Titulo + " " + v.Descricao)
+	has := func(terms ...string) bool {
+		for _, term := range terms {
+			if strings.Contains(blob, term) {
+				return true
+			}
+		}
+		return false
+	}
+
+	switch seniority {
+	case "junior":
+		return has("junior", "jr", "entry")
+	case "mid":
+		return has("mid", "middle", "pleno", "intermediate")
+	case "senior":
+		return has("senior", "sr", "sênior")
+	case "staff":
+		return has("staff", "principal")
+	case "lead":
+		return has("lead", "tech lead", "líder", "lider")
+	default:
+		return true
+	}
+}
+
+func matchesRemotePolicy(v domain.Vaga, remotePolicy string) bool {
+	if remotePolicy == "any" {
+		return true
+	}
+	blob := strings.ToLower(v.Titulo + " " + v.Descricao)
+	contains := func(terms ...string) bool {
+		for _, term := range terms {
+			if strings.Contains(blob, term) {
+				return true
+			}
+		}
+		return false
+	}
+
+	remoteHint := contains("remote", "remoto", "home office", "work from home", "wfh")
+	onsiteHint := contains("onsite", "on-site", "presencial")
+	hybridHint := contains("hybrid", "híbrido", "hibrido")
+
+	switch remotePolicy {
+	case "strict-remote":
+		return remoteHint && !onsiteHint && !hybridHint
+	case "remote-first":
+		if onsiteHint && !remoteHint {
+			return false
+		}
+		return true
+	default:
+		return true
+	}
 }
