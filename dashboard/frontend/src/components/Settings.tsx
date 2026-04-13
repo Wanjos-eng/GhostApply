@@ -6,12 +6,17 @@ export function Settings() {
     cohere_api_key: "",
     groq_api_key: "",
     gemini_api_key: "",
+    ats_min_score: "0.40",
     imap_server: "",
     imap_user: "",
     imap_pass: ""
   });
   const [status, setStatus] = useState("");
   const [imapTest, setImapTest] = useState("");
+
+  const notifySystemStatusRefresh = () => {
+    window.dispatchEvent(new Event('ghostapply:settings-saved'));
+  };
 
   useEffect(() => {
     // Funciona apenas dentro do runtime do Wails.
@@ -28,6 +33,9 @@ export function Settings() {
     if ((window as any).go) {
       const success = await SaveSettings(cfg);
       setStatus(success ? "Settings Saved!" : "Failed to save.");
+      if (success) {
+        notifySystemStatusRefresh();
+      }
       setTimeout(() => setStatus(""), 3000);
     }
   };
@@ -38,6 +46,7 @@ export function Settings() {
       if ((window as any).go) {
         const result = await VerifyIMAP(cfg);
         setImapTest(result ? "✅ IMAP connection successful" : "❌ Connection or login failed");
+        notifySystemStatusRefresh();
       }
     } catch {
       setImapTest("❌ Fatal error");
@@ -68,6 +77,20 @@ export function Settings() {
             <div className="space-y-1">
               <label className="text-xs font-semibold text-zinc-600">Groq API Key</label>
               <input type="password" value={cfg.groq_api_key} onChange={e => setCfg({...cfg, groq_api_key: e.target.value})} className="w-full text-sm p-3 bg-surface-container-low border border-outline-variant/30 rounded focus:ring-primary focus:border-primary" placeholder="Groq key..." />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-zinc-600">ATS Minimum Score (0.00-1.00)</label>
+              <input
+                type="number"
+                min="0"
+                max="1"
+                step="0.01"
+                value={cfg.ats_min_score}
+                onChange={e => setCfg({...cfg, ats_min_score: e.target.value})}
+                className="w-full text-sm p-3 bg-surface-container-low border border-outline-variant/30 rounded font-mono"
+                placeholder="0.40"
+              />
+              <p className="text-[11px] text-zinc-500">Sugestão: 0.35 (Jr), 0.45 (Pleno), 0.55 (Sênior/Staff).</p>
             </div>
           </div>
         </div>
