@@ -16,11 +16,15 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+	"unicode"
 
 	"github.com/emersion/go-imap/client"
 	_ "github.com/glebarez/go-sqlite"
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
+	"github.com/jung-kurt/gofpdf"
 	"github.com/ledongthuc/pdf"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -183,6 +187,9 @@ func mergeSettingsEnv(existing map[string]string, cfg SettingsDTO) map[string]st
 
 	envMap["IMAP_SERVER"] = strings.TrimSpace(cfg.ImapServer)
 	envMap["IMAP_USER"] = strings.TrimSpace(cfg.ImapUser)
+	if ats := strings.TrimSpace(cfg.ATSMinScore); ats != "" {
+		envMap["ATS_MIN_SCORE"] = ats
+	}
 	setSecret("COHERE_API_KEY", cfg.CohereAPIKey)
 	setSecret("GROQ_API_KEY", cfg.GroqAPIKey)
 	setSecret("GEMINI_API_KEY", cfg.GeminiAPIKey)
@@ -260,11 +267,681 @@ type App struct {
 	database           *sql.DB
 	databasePath       string
 	databaseStartupErr string
+	pipelineMu         sync.RWMutex
+	pipelineStatus     PipelineStatusDTO
+}
+
+type PipelineStepDTO struct {
+	ID         string `json:"id"`
+	Title      string `json:"title"`
+	Status     string `json:"status"`
+	Detail     string `json:"detail"`
+	StartedAt  string `json:"started_at"`
+	FinishedAt string `json:"finished_at"`
+}
+
+type PipelineStatusDTO struct {
+	State      string            `json:"state"`
+	Summary    string            `json:"summary"`
+	StartedAt  string            `json:"started_at"`
+	UpdatedAt  string            `json:"updated_at"`
+	FinishedAt string            `json:"finished_at"`
+	Steps      []PipelineStepDTO `json:"steps"`
+	Logs       []string          `json:"logs"`
 }
 
 // Cria a instância principal do app.
 func NewApp() *App {
-	return &App{}
+	return &App{pipelineStatus: initialPipelineStatus()}
+}
+
+func initialPipelineStatus() PipelineStatusDTO {
+	return PipelineStatusDTO{
+		State:   "idle",
+		Summary: "Pipeline parado",
+		Steps: []PipelineStepDTO{
+			{ID: "collect", Title: "Coleta de vagas", Status: "pending", Detail: "Aguardando início"},
+			{ID: "triage", Title: "Triagem e elegibilidade", Status: "pending", Detail: "Aguardando coleta"},
+			{ID: "forge", Title: "Melhoria de currículo", Status: "pending", Detail: "Aguardando triagem"},
+			{ID: "apply", Title: "Candidatura automática", Status: "pending", Detail: "Aguardando melhoria de currículo"},
+		},
+		Logs: []string{"Pronto para iniciar."},
+	}
+}
+
+func nowISO() string {
+	return time.Now().UTC().Format(time.RFC3339)
+}
+
+func (a *App) clonePipelineStatusLocked() PipelineStatusDTO {
+	cloned := a.pipelineStatus
+	cloned.Steps = append([]PipelineStepDTO(nil), a.pipelineStatus.Steps...)
+	cloned.Logs = append([]string(nil), a.pipelineStatus.Logs...)
+	return cloned
+}
+
+func (a *App) appendPipelineLogLocked(message string) {
+	timestamped := fmt.Sprintf("[%s] %s", time.Now().Format("15:04:05"), message)
+	a.pipelineStatus.Logs = append(a.pipelineStatus.Logs, timestamped)
+	if len(a.pipelineStatus.Logs) > 120 {
+		a.pipelineStatus.Logs = a.pipelineStatus.Logs[len(a.pipelineStatus.Logs)-120:]
+	}
+	a.pipelineStatus.UpdatedAt = nowISO()
+}
+
+func (a *App) setPipelineStepLocked(stepID, status, detail string) {
+	for i := range a.pipelineStatus.Steps {
+		if a.pipelineStatus.Steps[i].ID != stepID {
+			continue
+		}
+		a.pipelineStatus.Steps[i].Status = status
+		if strings.TrimSpace(detail) != "" {
+			a.pipelineStatus.Steps[i].Detail = detail
+		}
+		now := nowISO()
+		if status == "running" {
+			a.pipelineStatus.Steps[i].StartedAt = now
+		}
+		if status == "done" || status == "error" {
+			a.pipelineStatus.Steps[i].FinishedAt = now
+		}
+		a.pipelineStatus.UpdatedAt = now
+		break
+	}
+}
+
+func resolveScraperCommand() (*exec.Cmd, error) {
+	exePath, err := os.Executable()
+	if err == nil {
+		exeDir := filepath.Dir(exePath)
+		candidates := []string{
+			filepath.Join(exeDir, "scraper.exe"),
+			filepath.Join(exeDir, "scraper"),
+		}
+		for _, candidate := range candidates {
+			if info, statErr := os.Stat(candidate); statErr == nil && !info.IsDir() {
+				cmd := exec.Command(candidate)
+				cmd.Dir = exeDir
+				return cmd, nil
+			}
+		}
+	}
+
+	if _, lookErr := exec.LookPath("go"); lookErr == nil {
+		cmd := exec.Command("go", "run", "./cmd/scraper")
+		cmd.Dir = ".."
+		return cmd, nil
+	}
+
+	return nil, fmt.Errorf("scraper binary not found and 'go' is unavailable")
+}
+
+func runBackgroundCommand(cmd *exec.Cmd) (string, error) {
+	cmd.Env = os.Environ()
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	out := strings.TrimSpace(stdout.String())
+	errOut := strings.TrimSpace(stderr.String())
+	combined := strings.TrimSpace(strings.Join([]string{out, errOut}, "\n"))
+	if len(combined) > 800 {
+		combined = combined[:800] + "..."
+	}
+	return combined, err
+}
+
+func truncateForPrompt(raw string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	trimmed := strings.TrimSpace(raw)
+	if len(trimmed) <= max {
+		return trimmed
+	}
+	return trimmed[:max]
+}
+
+func extractPDFText(filePath string) (string, error) {
+	f, r, err := pdf.Open(filePath)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	b, err := r.GetPlainText()
+	if err != nil {
+		return "", err
+	}
+
+	var buf bytes.Buffer
+	_, _ = io.Copy(&buf, b)
+	return strings.TrimSpace(buf.String()), nil
+}
+
+func generateTailoredResumeText(apiKey, baseCVText, jobDescription string) (string, error) {
+	base := truncateForPrompt(baseCVText, 24000)
+	job := truncateForPrompt(jobDescription, 10000)
+
+	prompt := "" +
+		"Você é um especialista em currículo ATS e revisão técnica para recrutadores de tecnologia.\n" +
+		"Objetivo: maximizar aderência ATS SEM perder formato profissional humano.\n" +
+		"Regras obrigatórias:\n" +
+		"1) Texto simples, sem markdown, sem tabela, sem colunas, sem ícones, sem emojis, sem caracteres decorativos.\n" +
+		"2) Não inventar fatos. Use somente dados plausíveis presentes no currículo base.\n" +
+		"3) Espelhar naturalmente palavras-chave da vaga (skills, stack, ferramentas, senioridade, domínio).\n" +
+		"4) Experiências em ordem cronológica reversa com bullets de impacto mensurável quando possível.\n" +
+		"5) Linguagem objetiva, orientada a resultado, legível para recrutador em 20-30 segundos.\n" +
+		"6) Evitar blocos longos; preferir linhas curtas e bullets.\n" +
+		"Saída obrigatória exatamente nesta estrutura de seções:\n" +
+		"NOME COMPLETO\n" +
+		"CARGO ALVO\n" +
+		"CONTATO\n" +
+		"RESUMO PROFISSIONAL:\n" +
+		"COMPETENCIAS TECNICAS:\n" +
+		"EXPERIENCIA PROFISSIONAL:\n" +
+		"PROJETOS RELEVANTES:\n" +
+		"FORMACAO:\n" +
+		"CERTIFICACOES (SE HOUVER):\n" +
+		"IDIOMAS (SE HOUVER):\n\n" +
+		"--- CURRICULO BASE ---\n" + base + "\n\n" +
+		"--- DESCRICAO DA VAGA ---\n" + job
+
+	requestBody := map[string]interface{}{
+		"contents": []map[string]interface{}{
+			{
+				"parts": []map[string]string{{"text": prompt}},
+			},
+		},
+	}
+
+	jsonValue, _ := json.Marshal(requestBody)
+	req, reqErr := buildGeminiRequest("gemini-2.0-flash", apiKey, jsonValue)
+	if reqErr != nil {
+		return "", reqErr
+	}
+
+	resp, httpErr := outboundHTTPClient.Do(req)
+	if httpErr != nil {
+		return "", httpErr
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+		} `json:"candidates"`
+	}
+
+	if decErr := json.NewDecoder(resp.Body).Decode(&result); decErr != nil {
+		return "", decErr
+	}
+
+	if len(result.Candidates) == 0 || len(result.Candidates[0].Content.Parts) == 0 {
+		return "", fmt.Errorf("resposta Gemini vazia")
+	}
+
+	out := strings.TrimSpace(result.Candidates[0].Content.Parts[0].Text)
+	if out == "" {
+		return "", fmt.Errorf("resposta Gemini sem conteúdo")
+	}
+	return out, nil
+}
+
+func isResumeHeading(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return false
+	}
+	if strings.HasSuffix(trimmed, ":") {
+		return true
+	}
+	headingMap := map[string]bool{
+		"NOME COMPLETO":            true,
+		"CARGO ALVO":               true,
+		"CONTATO":                  true,
+		"RESUMO PROFISSIONAL":      true,
+		"COMPETENCIAS TECNICAS":    true,
+		"EXPERIENCIA PROFISSIONAL": true,
+		"PROJETOS RELEVANTES":      true,
+		"FORMACAO":                 true,
+		"CERTIFICACOES":            true,
+		"IDIOMAS":                  true,
+	}
+
+	normalized := strings.TrimSuffix(trimmed, ":")
+	return headingMap[normalized]
+}
+
+func writeResumePDF(filePath, content string) error {
+	pdfDoc := gofpdf.New("P", "mm", "A4", "")
+	pdfDoc.SetMargins(15, 15, 15)
+	pdfDoc.SetAutoPageBreak(true, 15)
+	pdfDoc.AddPage()
+	pdfDoc.SetFont("Arial", "", 10.5)
+
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			pdfDoc.Ln(2.4)
+			continue
+		}
+
+		if isResumeHeading(trimmed) {
+			pdfDoc.SetFont("Arial", "B", 11.5)
+			pdfDoc.MultiCell(0, 6.0, strings.TrimSuffix(trimmed, ":")+":", "", "L", false)
+			pdfDoc.SetFont("Arial", "", 10.5)
+			continue
+		}
+
+		pdfDoc.MultiCell(0, 5.0, trimmed, "", "L", false)
+	}
+
+	return pdfDoc.OutputFileAndClose(filePath)
+}
+
+func persistBaseCVPath(filePath string) {
+	envPath := getAppEnvPath()
+	existing, err := godotenv.Read(envPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.Printf("persistBaseCVPath: falha ao ler .env: %v", err)
+		return
+	}
+	if existing == nil {
+		existing = map[string]string{}
+	}
+
+	existing["BASE_CV_PATH"] = strings.TrimSpace(filePath)
+
+	if writeErr := godotenv.Write(existing, envPath); writeErr != nil {
+		log.Printf("persistBaseCVPath: falha ao escrever .env: %v", writeErr)
+		return
+	}
+	_ = os.Chmod(envPath, 0o600)
+	_ = os.Setenv("BASE_CV_PATH", strings.TrimSpace(filePath))
+}
+
+func parseATSMinimumScore(raw string) float64 {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return 0.40
+	}
+
+	val, err := strconv.ParseFloat(trimmed, 64)
+	if err != nil {
+		return 0.40
+	}
+
+	// Suporta valor em percentual inteiro (ex.: 65 -> 65%).
+	if val > 1 {
+		val = val / 100.0
+	}
+
+	if val < 0 {
+		return 0
+	}
+	if val > 1 {
+		return 1
+	}
+	return val
+}
+
+func tokenizeATS(text string) []string {
+	stop := map[string]struct{}{
+		"de": {}, "da": {}, "do": {}, "das": {}, "dos": {}, "para": {}, "com": {}, "sem": {},
+		"and": {}, "the": {}, "for": {}, "with": {}, "this": {}, "that": {}, "from": {}, "into": {},
+		"em": {}, "na": {}, "no": {}, "nas": {}, "nos": {}, "por": {}, "uma": {}, "um": {}, "as": {}, "os": {},
+	}
+
+	parts := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) {
+			return false
+		}
+		switch r {
+		case '+', '#', '.', '-':
+			return false
+		default:
+			return true
+		}
+	})
+
+	tokens := make([]string, 0, len(parts))
+	for _, p := range parts {
+		t := strings.Trim(p, ".-_")
+		if t == "" {
+			continue
+		}
+		if len(t) < 3 {
+			continue
+		}
+		if _, isStop := stop[t]; isStop {
+			continue
+		}
+		tokens = append(tokens, t)
+	}
+
+	return tokens
+}
+
+func extractATSKeywords(jobDescription string, maxKeywords int) []string {
+	if maxKeywords <= 0 {
+		return nil
+	}
+
+	freq := map[string]int{}
+	for _, t := range tokenizeATS(jobDescription) {
+		freq[t]++
+	}
+
+	type kv struct {
+		Token string
+		Count int
+	}
+	items := make([]kv, 0, len(freq))
+	for token, count := range freq {
+		items = append(items, kv{Token: token, Count: count})
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Count == items[j].Count {
+			return items[i].Token < items[j].Token
+		}
+		return items[i].Count > items[j].Count
+	})
+
+	if len(items) > maxKeywords {
+		items = items[:maxKeywords]
+	}
+
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		out = append(out, item.Token)
+	}
+	return out
+}
+
+func computeATSCoverage(resumeContent string, keywords []string) (float64, int, int, []string) {
+	if len(keywords) == 0 {
+		return 1, 0, 0, nil
+	}
+
+	resumeSet := map[string]struct{}{}
+	for _, t := range tokenizeATS(resumeContent) {
+		resumeSet[t] = struct{}{}
+	}
+
+	matched := 0
+	missing := make([]string, 0)
+	for _, kw := range keywords {
+		if _, ok := resumeSet[kw]; ok {
+			matched++
+		} else {
+			missing = append(missing, kw)
+		}
+	}
+
+	score := float64(matched) / float64(len(keywords))
+	return score, matched, len(keywords), missing
+}
+
+func (a *App) runInlineForger(cfg ProfileDTO) (int, int, int, error) {
+	if a.database == nil {
+		return 0, 0, 0, fmt.Errorf("banco indisponível")
+	}
+
+	_ = godotenv.Load(getAppEnvPath())
+	baseCVPath := strings.TrimSpace(os.Getenv("BASE_CV_PATH"))
+	if baseCVPath == "" {
+		return 0, 0, 0, fmt.Errorf("CV base não configurado; faça upload do PDF no BaseProfile")
+	}
+
+	baseCVText, err := extractPDFText(baseCVPath)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("falha ao ler CV base: %w", err)
+	}
+	if baseCVText == "" {
+		return 0, 0, 0, fmt.Errorf("CV base sem texto legível")
+	}
+
+	limit := cfg.AppsPerDay
+	if limit <= 0 {
+		limit = 50
+	}
+
+	rows, err := a.database.Query(`
+		SELECT id, COALESCE(descricao, '')
+		FROM Vaga_Prospectada
+		WHERE status = 'PENDENTE'
+		ORDER BY criado_em ASC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("falha ao carregar vagas pendentes: %w", err)
+	}
+	defer rows.Close()
+
+	type forgeTarget struct {
+		VagaID    string
+		Descricao string
+	}
+
+	targets := make([]forgeTarget, 0, limit)
+	for rows.Next() {
+		var t forgeTarget
+		if scanErr := rows.Scan(&t.VagaID, &t.Descricao); scanErr != nil {
+			return 0, 0, 0, fmt.Errorf("falha ao ler vaga pendente: %w", scanErr)
+		}
+		targets = append(targets, t)
+	}
+
+	if len(targets) == 0 {
+		return 0, 0, 0, nil
+	}
+
+	outputDir := filepath.Join(GetAppDir(), "forged-cv")
+	if mkErr := os.MkdirAll(outputDir, 0o700); mkErr != nil {
+		return 0, 0, 0, fmt.Errorf("falha ao preparar diretório de currículos: %w", mkErr)
+	}
+
+	geminiKey := strings.TrimSpace(os.Getenv("GEMINI_API_KEY"))
+	minATS := parseATSMinimumScore(os.Getenv("ATS_MIN_SCORE"))
+	forgedCount := 0
+	skippedCount := 0
+	lowATScount := 0
+
+	for _, target := range targets {
+		var existingID string
+		err := a.database.QueryRow(`
+			SELECT id
+			FROM Candidatura_Forjada
+			WHERE vaga_id = ?
+			  AND status IN ('FORJADO','ENVIADA','APLICADA','CONFIRMADA')
+			LIMIT 1
+		`, target.VagaID).Scan(&existingID)
+		if err == nil {
+			skippedCount++
+			_, _ = a.database.Exec("UPDATE Vaga_Prospectada SET status = 'ANALISADA' WHERE id = ?", target.VagaID)
+			continue
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return forgedCount, skippedCount, lowATScount, fmt.Errorf("falha ao verificar candidatura existente para vaga %s: %w", target.VagaID, err)
+		}
+
+		resumeContent := baseCVText
+		if geminiKey != "" && strings.TrimSpace(target.Descricao) != "" {
+			tailored, genErr := generateTailoredResumeText(geminiKey, baseCVText, target.Descricao)
+			if genErr == nil && strings.TrimSpace(tailored) != "" {
+				resumeContent = tailored
+			} else {
+				log.Printf("forger: fallback para CV base na vaga %s: %v", target.VagaID, genErr)
+			}
+		}
+
+		keywords := extractATSKeywords(target.Descricao, 40)
+		score, matched, total, missing := computeATSCoverage(resumeContent, keywords)
+		if total > 0 && score < minATS {
+			lowATScount++
+			missingPreview := ""
+			if len(missing) > 0 {
+				limitMissing := len(missing)
+				if limitMissing > 8 {
+					limitMissing = 8
+				}
+				missingPreview = strings.Join(missing[:limitMissing], ",")
+			}
+
+			_, _ = a.database.Exec("UPDATE Vaga_Prospectada SET status = 'ALERTA_MANUAL' WHERE id = ?", target.VagaID)
+			log.Printf("forger: ATS abaixo do mínimo na vaga %s (score=%.2f min=%.2f matched=%d/%d missing=%s)", target.VagaID, score, minATS, matched, total, missingPreview)
+			continue
+		}
+
+		fileName := fmt.Sprintf("%s-%s.pdf", target.VagaID, uuid.NewString())
+		forgedPath := filepath.Join(outputDir, fileName)
+
+		if writeErr := writeResumePDF(forgedPath, resumeContent); writeErr != nil {
+			return forgedCount, skippedCount, lowATScount, fmt.Errorf("falha ao gerar PDF forjado para vaga %s: %w", target.VagaID, writeErr)
+		}
+
+		candID := uuid.NewString()
+		if _, insErr := a.database.Exec(`
+			INSERT INTO Candidatura_Forjada (id, vaga_id, curriculo_path, status)
+			VALUES (?, ?, ?, 'FORJADO')
+		`, candID, target.VagaID, forgedPath); insErr != nil {
+			return forgedCount, skippedCount, lowATScount, fmt.Errorf("falha ao inserir candidatura forjada para vaga %s: %w", target.VagaID, insErr)
+		}
+
+		if _, updErr := a.database.Exec("UPDATE Vaga_Prospectada SET status = 'ANALISADA' WHERE id = ?", target.VagaID); updErr != nil {
+			return forgedCount, skippedCount, lowATScount, fmt.Errorf("falha ao atualizar status ANALISADA da vaga %s: %w", target.VagaID, updErr)
+		}
+
+		forgedCount++
+	}
+
+	return forgedCount, skippedCount, lowATScount, nil
+}
+
+// StartAutomationPipeline inicia coleta, triagem e candidatura em sequência com status detalhado para UI.
+func (a *App) StartAutomationPipeline(cfg ProfileDTO) bool {
+	a.pipelineMu.Lock()
+	if a.pipelineStatus.State == "running" {
+		a.appendPipelineLogLocked("Pipeline já está em execução.")
+		a.pipelineMu.Unlock()
+		return false
+	}
+
+	a.pipelineStatus = initialPipelineStatus()
+	a.pipelineStatus.State = "running"
+	a.pipelineStatus.Summary = "Iniciando pipeline..."
+	a.pipelineStatus.StartedAt = nowISO()
+	a.pipelineStatus.UpdatedAt = a.pipelineStatus.StartedAt
+	a.appendPipelineLogLocked(fmt.Sprintf("Inicializando pipeline com %d roles e %d tecnologias.", len(cfg.TargetRoles), len(cfg.CoreStack)))
+	a.pipelineMu.Unlock()
+
+	go func() {
+		finishWithError := func(stepID, detail string) {
+			a.pipelineMu.Lock()
+			a.setPipelineStepLocked(stepID, "error", detail)
+			a.pipelineStatus.State = "error"
+			a.pipelineStatus.Summary = detail
+			a.pipelineStatus.FinishedAt = nowISO()
+			a.appendPipelineLogLocked("Pipeline finalizado com erro: " + detail)
+			a.pipelineMu.Unlock()
+		}
+
+		a.pipelineMu.Lock()
+		a.setPipelineStepLocked("collect", "running", "Procurando vagas em fontes configuradas")
+		a.pipelineStatus.Summary = "Coletando vagas..."
+		a.appendPipelineLogLocked("Etapa 1/4: iniciando coleta de vagas.")
+		a.pipelineMu.Unlock()
+
+		scraperCmd, err := resolveScraperCommand()
+		if err != nil {
+			finishWithError("collect", "Não foi possível iniciar coleta: scraper indisponível")
+			return
+		}
+		scraperOutput, scraperErr := runBackgroundCommand(scraperCmd)
+		if scraperErr != nil {
+			detail := "Coleta falhou"
+			if strings.TrimSpace(scraperOutput) != "" {
+				detail = detail + ": " + scraperOutput
+			}
+			finishWithError("collect", detail)
+			return
+		}
+
+		a.pipelineMu.Lock()
+		a.setPipelineStepLocked("collect", "done", "Coleta concluída")
+		a.appendPipelineLogLocked("Coleta finalizada com sucesso.")
+		a.setPipelineStepLocked("triage", "running", "Calculando elegibilidade para candidatura")
+		a.pipelineStatus.Summary = "Processando triagem de candidaturas..."
+		jobs := a.FetchProspectedJobs()
+		metrics := a.GetProspectedMetrics()
+		a.setPipelineStepLocked("triage", "done", fmt.Sprintf("%d vagas coletadas (%d pendentes)", len(jobs), metrics.PendingCount))
+		a.appendPipelineLogLocked(fmt.Sprintf("Triagem concluída: %d vagas detectadas, %d pendentes para pipeline.", len(jobs), metrics.PendingCount))
+		a.pipelineMu.Unlock()
+
+		a.pipelineMu.Lock()
+		a.setPipelineStepLocked("forge", "running", "Adaptando currículo para cada vaga elegível")
+		a.pipelineStatus.Summary = "Forjando currículos por vaga..."
+		a.appendPipelineLogLocked("Etapa 3/4: iniciando melhoria de currículo por vaga.")
+		a.pipelineMu.Unlock()
+
+		forgedCount, skippedCount, lowATScount, forgeErr := a.runInlineForger(cfg)
+		if forgeErr != nil {
+			finishWithError("forge", "Forja de currículo falhou: "+forgeErr.Error())
+			return
+		}
+
+		a.pipelineMu.Lock()
+		forgeDetail := fmt.Sprintf("%d currículos forjados (%d já existentes, %d abaixo do ATS mínimo)", forgedCount, skippedCount, lowATScount)
+		if forgedCount == 0 && skippedCount == 0 && lowATScount == 0 {
+			forgeDetail = "Nenhuma vaga pendente para forjar"
+		}
+		a.setPipelineStepLocked("forge", "done", forgeDetail)
+		a.appendPipelineLogLocked("Forja concluída: " + forgeDetail)
+		a.setPipelineStepLocked("apply", "running", "Executando candidatura automática")
+		a.pipelineStatus.Summary = "Aplicando nas vagas elegíveis..."
+		a.appendPipelineLogLocked("Etapa 4/4: iniciando envio automático de candidaturas.")
+		a.pipelineMu.Unlock()
+
+		fillerCmd, err := resolveFillerCommand()
+		if err != nil {
+			finishWithError("apply", "Não foi possível iniciar candidatura: filler indisponível")
+			return
+		}
+		fillerOutput, fillerErr := runBackgroundCommand(fillerCmd)
+		if fillerErr != nil {
+			detail := "Candidatura falhou"
+			if strings.TrimSpace(fillerOutput) != "" {
+				detail = detail + ": " + fillerOutput
+			}
+			finishWithError("apply", detail)
+			return
+		}
+
+		a.pipelineMu.Lock()
+		a.setPipelineStepLocked("apply", "done", "Candidatura automática concluída")
+		a.pipelineStatus.State = "done"
+		a.pipelineStatus.Summary = "Pipeline concluído com sucesso"
+		a.pipelineStatus.FinishedAt = nowISO()
+		a.appendPipelineLogLocked("Pipeline concluído com sucesso.")
+		if strings.TrimSpace(fillerOutput) != "" {
+			a.appendPipelineLogLocked("Resumo do filler: " + fillerOutput)
+		}
+		a.pipelineMu.Unlock()
+	}()
+
+	return true
+}
+
+func (a *App) GetAutomationPipelineStatus() PipelineStatusDTO {
+	a.pipelineMu.RLock()
+	defer a.pipelineMu.RUnlock()
+	return a.clonePipelineStatusLocked()
 }
 
 // GetAppDir returns the persistent configuration directory (~/.ghostapply)
@@ -295,6 +972,7 @@ func ensureBootstrapEnv(appEnvPath string) {
 	defaults := map[string]string{
 		"DATABASE_URL":        "forja_ghost.sqlite",
 		"SESSION_PATH":        "session.json",
+		"ATS_MIN_SCORE":       "0.40",
 		"DATA_RETENTION_DAYS": "90",
 		"EMAIL_RETENTION_MAX": "2000",
 	}
@@ -1111,6 +1789,7 @@ type SettingsDTO struct {
 	CohereAPIKey string `json:"cohere_api_key"`
 	GroqAPIKey   string `json:"groq_api_key"`
 	GeminiAPIKey string `json:"gemini_api_key"`
+	ATSMinScore  string `json:"ats_min_score"`
 	ImapServer   string `json:"imap_server"`
 	ImapUser     string `json:"imap_user"`
 	ImapPass     string `json:"imap_pass"`
@@ -1122,6 +1801,8 @@ type ProfileDTO struct {
 	StrictlyRemote bool     `json:"strictly_remote"`
 	MinSalaryFloor string   `json:"min_salary_floor"`
 	AppsPerDay     int      `json:"apps_per_day"`
+	SourceFile     string   `json:"source_file"`
+	ParseStatus    string   `json:"parse_status"`
 }
 
 // Carrega o mapeamento local do .env para a tela de configurações do frontend.
@@ -1132,6 +1813,7 @@ func (a *App) LoadSettings() SettingsDTO {
 		CohereAPIKey: "",
 		GroqAPIKey:   "",
 		GeminiAPIKey: "",
+		ATSMinScore:  envOrDefault("ATS_MIN_SCORE", "0.40"),
 		ImapServer:   os.Getenv("IMAP_SERVER"),
 		ImapUser:     os.Getenv("IMAP_USER"),
 		ImapPass:     "",
@@ -1165,6 +1847,13 @@ func (a *App) SaveSettings(cfg SettingsDTO) bool {
 
 // Abre o seletor nativo, extrai o texto do PDF e pede ao Gemini o JSON estruturado.
 func (a *App) UploadAndParseCV() ProfileDTO {
+	baseProfile := ProfileDTO{
+		StrictlyRemote: true,
+		MinSalaryFloor: "$120,000",
+		AppsPerDay:     50,
+		ParseStatus:    "idle",
+	}
+
 	// 1. Abre o diálogo do sistema operacional.
 	filePath, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
 		Title: "Select your CV (PDF)",
@@ -1174,8 +1863,13 @@ func (a *App) UploadAndParseCV() ProfileDTO {
 	})
 	if err != nil || filePath == "" {
 		log.Println("UploadAndParseCV: No file selected or error:", err)
-		return ProfileDTO{}
+		baseProfile.ParseStatus = "cancelled"
+		return baseProfile
 	}
+
+	baseProfile.SourceFile = filepath.Base(filePath)
+	baseProfile.ParseStatus = "uploaded"
+	persistBaseCVPath(filePath)
 
 	log.Println("Parsing PDF File:", filePath)
 
@@ -1183,7 +1877,8 @@ func (a *App) UploadAndParseCV() ProfileDTO {
 	f, r, err := pdf.Open(filePath)
 	if err != nil {
 		log.Printf("UploadAndParseCV: Fail to open PDF: %v\n", err)
-		return ProfileDTO{}
+		baseProfile.ParseStatus = "error"
+		return baseProfile
 	}
 	defer f.Close()
 
@@ -1191,7 +1886,8 @@ func (a *App) UploadAndParseCV() ProfileDTO {
 	b, err := r.GetPlainText()
 	if err != nil {
 		log.Printf("UploadAndParseCV: Fail to extract text: %v\n", err)
-		return ProfileDTO{}
+		baseProfile.ParseStatus = "error"
+		return baseProfile
 	}
 	buf.ReadFrom(b)
 	textContent := buf.String()
@@ -1200,7 +1896,8 @@ func (a *App) UploadAndParseCV() ProfileDTO {
 	apiKey := os.Getenv("GEMINI_API_KEY")
 	if apiKey == "" {
 		log.Println("UploadAndParseCV: No GEMINI_API_KEY found")
-		return ProfileDTO{}
+		baseProfile.ParseStatus = "uploaded"
+		return baseProfile
 	}
 
 	prompt := `I am providing a CV in raw text below.
@@ -1223,13 +1920,15 @@ CV Text:
 	req, reqErr := buildGeminiRequest("gemini-2.0-flash", apiKey, jsonValue)
 	if reqErr != nil {
 		log.Printf("UploadAndParseCV: Failed to build Gemini request: %v\n", reqErr)
-		return ProfileDTO{}
+		baseProfile.ParseStatus = "error"
+		return baseProfile
 	}
 
 	resp, httpErr := outboundHTTPClient.Do(req)
 	if httpErr != nil {
 		log.Printf("UploadAndParseCV: Gemini HTTP Call Failed: %v\n", httpErr)
-		return ProfileDTO{}
+		baseProfile.ParseStatus = "error"
+		return baseProfile
 	}
 	defer resp.Body.Close()
 
@@ -1245,7 +1944,8 @@ CV Text:
 
 	if decErr := json.NewDecoder(resp.Body).Decode(&result); decErr != nil {
 		log.Printf("UploadAndParseCV: Failed to decode Gemini Response: %v", decErr)
-		return ProfileDTO{}
+		baseProfile.ParseStatus = "error"
+		return baseProfile
 	}
 
 	if len(result.Candidates) > 0 && len(result.Candidates[0].Content.Parts) > 0 {
@@ -1253,34 +1953,36 @@ CV Text:
 		geminiJSON = string(bytes.TrimSpace([]byte(geminiJSON)))
 		log.Printf("UploadAndParseCV: Gemini JSON recebido (%d bytes)", len(geminiJSON))
 		var parsed ProfileDTO
-		// Preenche os valores padrão.
-		parsed.StrictlyRemote = true
-		parsed.MinSalaryFloor = "$120,000"
-		parsed.AppsPerDay = 50
+		parsed = baseProfile
 
 		if err := json.Unmarshal([]byte(geminiJSON), &parsed); err != nil {
 			log.Printf("UploadAndParseCV: Could not unmarshal string format: %v", err)
-			return ProfileDTO{}
+			baseProfile.ParseStatus = "uploaded"
+			return baseProfile
 		}
+
+		parsed.SourceFile = baseProfile.SourceFile
+		parsed.ParseStatus = "parsed"
 
 		return parsed
 	}
 
-	return ProfileDTO{}
+	baseProfile.ParseStatus = "uploaded"
+	return baseProfile
 }
 
 // StartDaemon inicia o job batch do filler em segundo plano.
 func (a *App) StartDaemon(cfg ProfileDTO) bool {
 	log.Printf("🚀 WAILS: Launching Filler Daemon with config: %+v", cfg)
 
+	cmd, err := resolveFillerCommand()
+	if err != nil {
+		log.Printf("❌ Filler launch failed (preflight): %v", err)
+		return false
+	}
+
 	// Sobe o filler como subprocesso em background sem travar a UI.
 	go func() {
-		cmd, err := resolveFillerCommand()
-		if err != nil {
-			log.Printf("❌ Filler launch failed: %v", err)
-			return
-		}
-
 		// Herda o ambiente atual; o filler lê o .env na inicialização.
 		cmd.Env = os.Environ()
 
@@ -1289,8 +1991,13 @@ func (a *App) StartDaemon(cfg ProfileDTO) bool {
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
 
-		// Executa de forma síncrona dentro da goroutine.
-		if err := cmd.Run(); err != nil {
+		if err := cmd.Start(); err != nil {
+			log.Printf("❌ Filler start failed: %v", err)
+			return
+		}
+
+		// Aguarda término em background apenas para logging e diagnóstico.
+		if err := cmd.Wait(); err != nil {
 			log.Printf("❌ Filler exited with error: %v (stdout_bytes=%d stderr_bytes=%d)",
 				err, stdout.Len(), stderr.Len())
 		} else {
