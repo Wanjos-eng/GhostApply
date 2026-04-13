@@ -69,6 +69,33 @@ Ao abrir o app pela primeira vez:
 2. Teste a conexão IMAP no botão Test Connection.
 3. Rode o scraper para popular vagas e depois o fluxo de candidatura.
 
+### Ajuste ATS Recomendado
+
+O pipeline de forja usa `ATS_MIN_SCORE` para decidir se o currículo gerado está aderente o bastante para ATS.
+
+- Regra: se o score ficar abaixo do mínimo, a vaga vai para `ALERTA_MANUAL`.
+- Faixa aceita: `0.00` a `1.00`.
+- Também aceita percentual inteiro: `65` equivale a `0.65`.
+- Valor padrão de bootstrap: `0.40`.
+
+Recomendação inicial por senioridade:
+
+1. Júnior: `0.35`
+2. Pleno: `0.45`
+3. Sênior/Staff: `0.55`
+
+Exemplo no `.env` do app:
+
+```env
+ATS_MIN_SCORE=0.45
+```
+
+Calibração prática:
+
+1. Se muitas vagas boas caírem em `ALERTA_MANUAL`, reduza em `0.05`.
+2. Se currículos pouco aderentes estiverem passando, aumente em `0.05`.
+3. Evite valores acima de `0.70` no início para não bloquear oportunidades reais.
+
 ## Arquitetura do Repositório
 
 Estrutura de alto nível:
