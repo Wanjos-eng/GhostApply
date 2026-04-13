@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { FetchEmails, FetchHistory, FetchInterviews, GerarDossieEstudos } from "../../wailsjs/go/main/App";
+import { FetchEmails, FetchHistory, FetchInterviews, GerarDossieEstudos, RunPerformanceSuite } from "../../wailsjs/go/main/App";
 
 interface EmailRecrutador {
   id: string;
@@ -63,21 +63,19 @@ export function DashboardView() {
   const [perfLoading, setPerfLoading] = useState(false);
   const [perf, setPerf] = useState<PerformanceSuiteDTO | null>(null);
 
-  useEffect(() => {
-    const runPerformance = async () => {
-      setPerfLoading(true);
-      try {
-        if ((window as any).go?.main?.App?.RunPerformanceSuite) {
-          const perfData = await (window as any).go.main.App.RunPerformanceSuite();
-          setPerf(perfData as PerformanceSuiteDTO);
-        }
-      } catch (err) {
-        console.error("Performance suite failed:", err);
-      } finally {
-        setPerfLoading(false);
-      }
-    };
+  const runPerformance = async () => {
+    setPerfLoading(true);
+    try {
+      const perfData = await RunPerformanceSuite();
+      setPerf(perfData as PerformanceSuiteDTO);
+    } catch (err) {
+      console.error("Performance suite failed:", err);
+    } finally {
+      setPerfLoading(false);
+    }
+  };
 
+  useEffect(() => {
     const fillData = async () => {
       setLoading(true);
       try {
@@ -138,7 +136,7 @@ export function DashboardView() {
   };
 
   return (
-    <div className="p-8 space-y-8 overflow-y-auto">
+    <div className="w-full h-full p-8 space-y-8">
       
       {/* Cabeçalho principal e ação de performance */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
@@ -148,19 +146,7 @@ export function DashboardView() {
         </div>
         <div className="flex p-1 bg-surface-container rounded-lg shrink-0">
           <button
-            onClick={async () => {
-              setPerfLoading(true);
-              try {
-                if ((window as any).go?.main?.App?.RunPerformanceSuite) {
-                  const perfData = await (window as any).go.main.App.RunPerformanceSuite();
-                  setPerf(perfData as PerformanceSuiteDTO);
-                }
-              } catch (err) {
-                console.error("Manual performance suite failed:", err);
-              } finally {
-                setPerfLoading(false);
-              }
-            }}
+            onClick={runPerformance}
             className="px-4 py-1.5 text-xs font-semibold rounded bg-white shadow-sm text-on-surface transition-all"
           >
             {perfLoading ? 'Running Perf...' : 'Run Performance'}
