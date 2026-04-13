@@ -26,6 +26,10 @@ export function GerarDossieEstudos(arg1) {
   return window['go']['main']['App']['GerarDossieEstudos'](arg1);
 }
 
+export function GetAutomationPipelineStatus() {
+  return window['go']['main']['App']['GetAutomationPipelineStatus']();
+}
+
 export function GetProspectedMetrics() {
   return window['go']['main']['App']['GetProspectedMetrics']();
 }
@@ -44,6 +48,10 @@ export function RunPerformanceSuite() {
 
 export function SaveSettings(arg1) {
   return window['go']['main']['App']['SaveSettings'](arg1);
+}
+
+export function StartAutomationPipeline(arg1) {
+  return window['go']['main']['App']['StartAutomationPipeline'](arg1);
 }
 
 export function StartDaemon(arg1) {
