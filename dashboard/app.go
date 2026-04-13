@@ -354,7 +354,11 @@ func (a *App) setPipelineStepLocked(stepID, status, detail string) {
 // contains the given sentinel sub-path (file or directory).  Returns the
 // absolute path of the matching directory, or "" if none is found.
 func findProjectRoot(startDir, sentinel string) string {
-	dir := startDir
+	abs, err := filepath.Abs(startDir)
+	if err != nil {
+		return ""
+	}
+	dir := abs
 	for {
 		if _, err := os.Stat(filepath.Join(dir, sentinel)); err == nil {
 			return dir
