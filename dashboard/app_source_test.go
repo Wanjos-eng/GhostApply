@@ -3,7 +3,6 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -75,27 +74,17 @@ func TestNormalizeDatabasePath(t *testing.T) {
 }
 
 func TestBuildDashboardSQLiteDSN(t *testing.T) {
-	t.Run("windows path with key", func(t *testing.T) {
-		dsn := buildDashboardSQLiteDSN(`C:\Program Files (x86)\GhostApply\forja_ghost.sqlite`, "abc123")
-		if !strings.HasPrefix(dsn, "file:C:/Program Files (x86)/GhostApply/forja_ghost.sqlite?") {
+	t.Run("windows path", func(t *testing.T) {
+		dsn := buildDashboardSQLiteDSN(`C:\Program Files (x86)\GhostApply\forja_ghost.sqlite`)
+		if dsn != "file:C:/Program Files (x86)/GhostApply/forja_ghost.sqlite" {
 			t.Fatalf("dsn prefix inesperado: %q", dsn)
-		}
-		if !strings.Contains(dsn, "_pragma=key('abc123')") {
-			t.Fatalf("dsn sem key pragma: %q", dsn)
-		}
-	})
-
-	t.Run("key escaping", func(t *testing.T) {
-		dsn := buildDashboardSQLiteDSN("/tmp/forja_ghost.sqlite", "te'st")
-		if !strings.Contains(dsn, "_pragma=key('te''st')") {
-			t.Fatalf("escape de key inválido: %q", dsn)
 		}
 	})
 
 	t.Run("without key", func(t *testing.T) {
-		dsn := buildDashboardSQLiteDSN("/tmp/forja_ghost.sqlite", "")
-		if strings.Contains(dsn, "_pragma=key(") {
-			t.Fatalf("dsn sem key deveria omitir pragma key: %q", dsn)
+		dsn := buildDashboardSQLiteDSN("/tmp/forja_ghost.sqlite")
+		if dsn != "file:/tmp/forja_ghost.sqlite" {
+			t.Fatalf("dsn inesperado: %q", dsn)
 		}
 	})
 }
