@@ -7,12 +7,19 @@ export function Settings() {
     groq_api_key: "",
     gemini_api_key: "",
     ats_min_score: "0.40",
+    search_keywords: "software engineer,backend,java,golang",
+    search_country: "BR",
+    gupy_company_urls: "",
+    greenhouse_boards: "",
+    lever_companies: "",
     imap_server: "",
     imap_user: "",
     imap_pass: ""
   });
   const [status, setStatus] = useState("");
   const [imapTest, setImapTest] = useState("");
+  const [linkedinStatus, setLinkedinStatus] = useState("");
+  const [linking, setLinking] = useState(false);
 
   const notifySystemStatusRefresh = () => {
     window.dispatchEvent(new Event('ghostapply:settings-saved'));
@@ -22,7 +29,7 @@ export function Settings() {
     // Funciona apenas dentro do runtime do Wails.
     if ((window as any).go) {
       LoadSettings().then(data => {
-        if (data) setCfg(data);
+        if (data) setCfg(prev => ({ ...prev, ...(data as any) }));
       });
     }
   }, []);
@@ -53,8 +60,26 @@ export function Settings() {
     }
   };
 
+  const handleConnectLinkedIn = async () => {
+    setLinking(true);
+    setLinkedinStatus("Abrindo navegador para login no LinkedIn...");
+    try {
+      const app = (window as any).go?.main?.App;
+      if (!app?.ConnectLinkedInSession) {
+        setLinkedinStatus("Runtime Wails indisponível para conectar LinkedIn.");
+        return;
+      }
+      const result = await app.ConnectLinkedInSession();
+      setLinkedinStatus(String(result || "Conexão LinkedIn finalizada."));
+    } catch (e) {
+      setLinkedinStatus(`Falha ao conectar LinkedIn: ${String(e)}`);
+    } finally {
+      setLinking(false);
+    }
+  };
+
   return (
-    <div className="p-8 space-y-8 overflow-y-auto w-full">
+    <div className="w-full h-full p-8 space-y-8">
       <div className="flex flex-col gap-2">
         <h1 className="font-headline font-bold text-[3.5rem] leading-tight text-on-surface tracking-tight">System Settings</h1>
         <p className="text-on-surface-variant max-w-xl">Core GhostApply API keys and IMAP configuration.</p>
@@ -92,6 +117,78 @@ export function Settings() {
               />
               <p className="text-[11px] text-zinc-500">Sugestão: 0.35 (Jr), 0.45 (Pleno), 0.55 (Sênior/Staff).</p>
             </div>
+          </div>
+        </div>
+
+        <div className="space-y-4 pt-6">
+          <h2 className="text-sm font-bold uppercase tracking-widest text-on-surface-variant border-b pb-2">Job Providers (Coleta)</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-1 md:col-span-2">
+              <label className="text-xs font-semibold text-zinc-600">Search Keywords (CSV)</label>
+              <input
+                type="text"
+                value={cfg.search_keywords}
+                onChange={e => setCfg({...cfg, search_keywords: e.target.value})}
+                className="w-full text-sm p-3 bg-surface-container-low border border-outline-variant/30 rounded font-mono"
+                placeholder="software engineer,backend,java,golang"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-zinc-600">Search Country</label>
+              <input
+                type="text"
+                value={cfg.search_country}
+                onChange={e => setCfg({...cfg, search_country: e.target.value})}
+                className="w-full text-sm p-3 bg-surface-container-low border border-outline-variant/30 rounded font-mono"
+                placeholder="BR"
+              />
+            </div>
+            <div className="space-y-1 md:col-span-2">
+              <label className="text-xs font-semibold text-zinc-600">Gupy Boards (CSV URLs)</label>
+              <input
+                type="text"
+                value={cfg.gupy_company_urls}
+                onChange={e => setCfg({...cfg, gupy_company_urls: e.target.value})}
+                className="w-full text-sm p-3 bg-surface-container-low border border-outline-variant/30 rounded font-mono"
+                placeholder="empresa1.gupy.io,empresa2.gupy.io"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-zinc-600">Greenhouse Boards (CSV slugs)</label>
+              <input
+                type="text"
+                value={cfg.greenhouse_boards}
+                onChange={e => setCfg({...cfg, greenhouse_boards: e.target.value})}
+                className="w-full text-sm p-3 bg-surface-container-low border border-outline-variant/30 rounded font-mono"
+                placeholder="company-a,company-b"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-zinc-600">Lever Companies (CSV slugs)</label>
+              <input
+                type="text"
+                value={cfg.lever_companies}
+                onChange={e => setCfg({...cfg, lever_companies: e.target.value})}
+                className="w-full text-sm p-3 bg-surface-container-low border border-outline-variant/30 rounded font-mono"
+                placeholder="company-a,company-b"
+              />
+            </div>
+          </div>
+          <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 space-y-3">
+            <div className="flex items-center justify-between gap-4">
+              <p className="text-xs font-semibold text-blue-900">
+                LinkedIn exige sessão válida para melhor cobertura. Conecte via navegador para gerar o `session.json`.
+              </p>
+              <button
+                type="button"
+                onClick={handleConnectLinkedIn}
+                disabled={linking}
+                className="px-3 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-300 text-white text-xs font-semibold rounded transition"
+              >
+                {linking ? 'Conectando...' : 'Conectar LinkedIn'}
+              </button>
+            </div>
+            {linkedinStatus && <p className="text-[11px] text-blue-800 font-mono">{linkedinStatus}</p>}
           </div>
         </div>
 
