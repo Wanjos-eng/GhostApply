@@ -29,7 +29,12 @@ export const HistoryView = () => {
   const loadData = async () => {
     setLoading(true);
     try {
-      const data: VagaHistoricoDTO[] = await (window as any).go.main.App.FetchHistory();
+      const app = (window as any).go?.main?.App;
+      if (!app?.FetchHistory) {
+        setHistory([]);
+        return;
+      }
+      const data: VagaHistoricoDTO[] = await app.FetchHistory();
       setHistory(data || []);
     } catch (e) {
       console.error(e);
@@ -41,7 +46,12 @@ export const HistoryView = () => {
   const generateOutreach = async (recruiterName: string, roleName: string) => {
     setOutreachModal({ open: true, loading: true, text: '', recruiter: recruiterName || 'Recrutador' });
     try {
-      const msg = await (window as any).go.main.App.GenerateOutreachMessage(recruiterName, roleName);
+      const app = (window as any).go?.main?.App;
+      if (!app?.GenerateOutreachMessage) {
+        setOutreachModal(prev => ({ ...prev, loading: false, text: 'Runtime Wails indisponível para gerar outreach.' }));
+        return;
+      }
+      const msg = await app.GenerateOutreachMessage(recruiterName, roleName);
       setOutreachModal(prev => ({ ...prev, loading: false, text: msg }));
     } catch (e) {
       setOutreachModal(prev => ({ ...prev, loading: false, text: 'Error generating message: ' + String(e) }));
@@ -78,7 +88,7 @@ export const HistoryView = () => {
   };
 
   return (
-    <div className="flex-1 overflow-y-auto p-10 bg-gradient-to-br from-[#f9f9f9] to-gray-100/50">
+    <div className="w-full h-full p-10 bg-gradient-to-br from-[#f9f9f9] to-gray-100/50">
       
       {/* Cabeçalho e filtros */}
       <div className="flex justify-between items-end mb-8">
