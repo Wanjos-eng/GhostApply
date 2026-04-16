@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -33,8 +34,16 @@ import (
 )
 
 const defaultIMAPAddress = "imap.gmail.com:993"
+const defaultGeminiModel = "gemini-2.0-flash"
 
 var outboundHTTPClient = &http.Client{Timeout: 20 * time.Second}
+
+var geminiModelCache = struct {
+	mu      sync.RWMutex
+	apiKey  string
+	model   string
+	expires time.Time
+}{expires: time.Time{}}
 
 type EmailRecrutador struct {
 	ID            string `json:"id"`
@@ -160,6 +169,9 @@ func parseCreatedAt(value string) (time.Time, bool) {
 }
 
 func buildGeminiRequest(model, apiKey string, payload []byte) (*http.Request, error) {
+	if strings.TrimSpace(model) == "" {
+		model = resolveGeminiModel(apiKey, false)
+	}
 	endpoint := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent", model)
 	req, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(payload))
 	if err != nil {
@@ -168,6 +180,235 @@ func buildGeminiRequest(model, apiKey string, payload []byte) (*http.Request, er
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-goog-api-key", apiKey)
 	return req, nil
+}
+
+func parseRetryAfterDelay(raw string) (time.Duration, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return 0, false
+	}
+
+	if seconds, err := strconv.Atoi(trimmed); err == nil {
+		if seconds <= 0 {
+			return 0, false
+		}
+		return time.Duration(seconds) * time.Second, true
+	}
+
+	if ts, err := time.Parse(time.RFC1123, trimmed); err == nil {
+		d := time.Until(ts)
+		if d > 0 {
+			return d, true
+		}
+	}
+
+	if ts, err := time.Parse(time.RFC1123Z, trimmed); err == nil {
+		d := time.Until(ts)
+		if d > 0 {
+			return d, true
+		}
+	}
+
+	return 0, false
+}
+
+func isRetryableGeminiStatus(statusCode int) bool {
+	switch statusCode {
+	case http.StatusTooManyRequests, http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	default:
+		return false
+	}
+}
+
+func invalidateGeminiModelCache() {
+	geminiModelCache.mu.Lock()
+	geminiModelCache.apiKey = ""
+	geminiModelCache.model = ""
+	geminiModelCache.expires = time.Time{}
+	geminiModelCache.mu.Unlock()
+}
+
+func supportsGenerateContent(methods []string) bool {
+	for _, method := range methods {
+		if strings.EqualFold(strings.TrimSpace(method), "generateContent") {
+			return true
+		}
+	}
+	return false
+}
+
+func resolveGeminiModel(apiKey string, forceRefresh bool) string {
+	trimmedKey := strings.TrimSpace(apiKey)
+	if trimmedKey == "" {
+		return defaultGeminiModel
+	}
+
+	now := time.Now()
+	if !forceRefresh {
+		geminiModelCache.mu.RLock()
+		if geminiModelCache.apiKey == trimmedKey && geminiModelCache.model != "" && now.Before(geminiModelCache.expires) {
+			cached := geminiModelCache.model
+			geminiModelCache.mu.RUnlock()
+			return cached
+		}
+		geminiModelCache.mu.RUnlock()
+	}
+
+	req, err := http.NewRequest("GET", "https://generativelanguage.googleapis.com/v1beta/models?pageSize=100", nil)
+	if err != nil {
+		return defaultGeminiModel
+	}
+	req.Header.Set("x-goog-api-key", trimmedKey)
+
+	resp, err := outboundHTTPClient.Do(req)
+	if err != nil {
+		log.Printf("resolveGeminiModel: list models failed: %v", err)
+		return defaultGeminiModel
+	}
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
+	_ = resp.Body.Close()
+	if readErr != nil {
+		log.Printf("resolveGeminiModel: list models read failed: %v", readErr)
+		return defaultGeminiModel
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		preview := strings.TrimSpace(string(body))
+		if len(preview) > 220 {
+			preview = preview[:220] + "..."
+		}
+		log.Printf("resolveGeminiModel: list models HTTP %d: %s", resp.StatusCode, preview)
+		return defaultGeminiModel
+	}
+
+	var listResponse struct {
+		Models []struct {
+			Name                       string   `json:"name"`
+			SupportedGenerationMethods []string `json:"supportedGenerationMethods"`
+		} `json:"models"`
+	}
+	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&listResponse); err != nil {
+		log.Printf("resolveGeminiModel: decode list models failed: %v", err)
+		return defaultGeminiModel
+	}
+
+	selected := ""
+	for _, model := range listResponse.Models {
+		if !supportsGenerateContent(model.SupportedGenerationMethods) {
+			continue
+		}
+		name := strings.TrimPrefix(strings.TrimSpace(model.Name), "models/")
+		if name == "" {
+			continue
+		}
+		selected = name
+		break
+	}
+	if selected == "" {
+		selected = defaultGeminiModel
+	}
+
+	geminiModelCache.mu.Lock()
+	geminiModelCache.apiKey = trimmedKey
+	geminiModelCache.model = selected
+	geminiModelCache.expires = now.Add(20 * time.Minute)
+	geminiModelCache.mu.Unlock()
+
+	return selected
+}
+
+func doGeminiRequestWithRetry(model, apiKey string, payload []byte, maxAttempts int, initialBackoff time.Duration) ([]byte, int, error) {
+	if maxAttempts <= 0 {
+		maxAttempts = 1
+	}
+	if initialBackoff <= 0 {
+		initialBackoff = 1200 * time.Millisecond
+	}
+
+	var lastErr error
+	var lastBody []byte
+	lastStatus := 0
+	requestedModel := strings.TrimSpace(model)
+	modelAuto := requestedModel == ""
+	forceModelRefresh := false
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		effectiveModel := requestedModel
+		if modelAuto {
+			effectiveModel = resolveGeminiModel(apiKey, forceModelRefresh)
+			forceModelRefresh = false
+		}
+
+		req, reqErr := buildGeminiRequest(effectiveModel, apiKey, payload)
+		if reqErr != nil {
+			return nil, 0, reqErr
+		}
+
+		resp, httpErr := outboundHTTPClient.Do(req)
+		if httpErr != nil {
+			lastErr = httpErr
+			if attempt < maxAttempts {
+				backoff := initialBackoff * time.Duration(1<<(attempt-1))
+				if backoff > 12*time.Second {
+					backoff = 12 * time.Second
+				}
+				time.Sleep(backoff)
+				continue
+			}
+			return nil, 0, httpErr
+		}
+
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024))
+		_ = resp.Body.Close()
+		if readErr != nil {
+			lastErr = readErr
+			if attempt < maxAttempts {
+				backoff := initialBackoff * time.Duration(1<<(attempt-1))
+				if backoff > 12*time.Second {
+					backoff = 12 * time.Second
+				}
+				time.Sleep(backoff)
+				continue
+			}
+			return nil, resp.StatusCode, readErr
+		}
+
+		lastBody = body
+		lastStatus = resp.StatusCode
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			return body, resp.StatusCode, nil
+		}
+
+		lastErr = fmt.Errorf("Gemini HTTP %d (model=%s)", resp.StatusCode, effectiveModel)
+		if modelAuto && resp.StatusCode == http.StatusNotFound && attempt < maxAttempts {
+			invalidateGeminiModelCache()
+			forceModelRefresh = true
+			continue
+		}
+		if !isRetryableGeminiStatus(resp.StatusCode) || attempt >= maxAttempts {
+			break
+		}
+
+		if retryAfter, ok := parseRetryAfterDelay(resp.Header.Get("Retry-After")); ok {
+			if retryAfter > 15*time.Second {
+				retryAfter = 15 * time.Second
+			}
+			time.Sleep(retryAfter)
+			continue
+		}
+
+		backoff := initialBackoff * time.Duration(1<<(attempt-1))
+		if backoff > 12*time.Second {
+			backoff = 12 * time.Second
+		}
+		time.Sleep(backoff)
+	}
+
+	if lastErr == nil {
+		lastErr = fmt.Errorf("falha desconhecida na chamada Gemini")
+	}
+	return lastBody, lastStatus, lastErr
 }
 
 func mergeSettingsEnv(existing map[string]string, cfg SettingsDTO) map[string]string {
@@ -401,7 +642,29 @@ func resolveProjectRootFor(sentinelDir string) string {
 	return ".."
 }
 
+func resolveProjectRootForStrict(sentinelDir string) (string, bool) {
+	if exePath, err := os.Executable(); err == nil {
+		if root := findProjectRoot(filepath.Dir(exePath), sentinelDir); root != "" {
+			return root, true
+		}
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		if root := findProjectRoot(cwd, sentinelDir); root != "" {
+			return root, true
+		}
+	}
+	return "", false
+}
+
 func resolveScraperCommand() (*exec.Cmd, error) {
+	if _, lookErr := exec.LookPath("go"); lookErr == nil {
+		if projectRoot, ok := resolveProjectRootForStrict(filepath.Join("cmd", "scraper")); ok {
+			cmd := exec.Command("go", "run", "./cmd/scraper")
+			cmd.Dir = projectRoot
+			return cmd, nil
+		}
+	}
+
 	exePath, err := os.Executable()
 	if err == nil {
 		exeDir := filepath.Dir(exePath)
@@ -822,16 +1085,17 @@ func generateTailoredResumeText(apiKey, baseCVText, jobDescription string) (stri
 	}
 
 	jsonValue, _ := json.Marshal(requestBody)
-	req, reqErr := buildGeminiRequest("gemini-2.0-flash", apiKey, jsonValue)
+	body, statusCode, reqErr := doGeminiRequestWithRetry("", apiKey, jsonValue, 4, 1200*time.Millisecond)
 	if reqErr != nil {
 		return "", reqErr
 	}
-
-	resp, httpErr := outboundHTTPClient.Do(req)
-	if httpErr != nil {
-		return "", httpErr
+	if statusCode < 200 || statusCode >= 300 {
+		preview := strings.TrimSpace(string(body))
+		if len(preview) > 220 {
+			preview = preview[:220] + "..."
+		}
+		return "", fmt.Errorf("Gemini HTTP %d: %s", statusCode, preview)
 	}
-	defer resp.Body.Close()
 
 	var result struct {
 		Candidates []struct {
@@ -843,7 +1107,7 @@ func generateTailoredResumeText(apiKey, baseCVText, jobDescription string) (stri
 		} `json:"candidates"`
 	}
 
-	if decErr := json.NewDecoder(resp.Body).Decode(&result); decErr != nil {
+	if decErr := json.NewDecoder(bytes.NewReader(body)).Decode(&result); decErr != nil {
 		return "", decErr
 	}
 
@@ -1120,6 +1384,8 @@ func (a *App) runInlineForger(cfg ProfileDTO) (int, int, int, error) {
 		limit = 50
 	}
 
+	nextGeminiAt := time.Time{}
+
 	rows, err := a.database.Query(`
 		SELECT id, COALESCE(titulo, ''), COALESCE(empresa, ''), COALESCE(url, ''), COALESCE(descricao, '')
 		FROM Vaga_Prospectada
@@ -1184,12 +1450,18 @@ func (a *App) runInlineForger(cfg ProfileDTO) (int, int, int, error) {
 
 		resumeContent := baseCVText
 		if geminiKey != "" && strings.TrimSpace(target.Descricao) != "" {
+			if !nextGeminiAt.IsZero() {
+				if wait := time.Until(nextGeminiAt); wait > 0 {
+					time.Sleep(wait)
+				}
+			}
 			tailored, genErr := generateTailoredResumeText(geminiKey, baseCVText, target.Descricao)
 			if genErr == nil && strings.TrimSpace(tailored) != "" {
 				resumeContent = tailored
 			} else {
 				log.Printf("forger: fallback para CV base na vaga %s: %v", target.VagaID, genErr)
 			}
+			nextGeminiAt = time.Now().Add(1500 * time.Millisecond)
 		}
 
 		keywords := extractATSKeywords(target.Descricao, 40)
@@ -1271,7 +1543,12 @@ func (a *App) StartAutomationPipeline(cfg ProfileDTO) bool {
 	a.appendPipelineLogLocked(fmt.Sprintf("Inicializando pipeline com %d roles e %d tecnologias.", len(cfg.TargetRoles), len(cfg.CoreStack)))
 	a.appendPipelineLogLocked(fmt.Sprintf("Gemini indicou %d palavras-chave de busca.", len(cfg.SuggestedKeywords)))
 	a.appendPipelineLogLocked(fmt.Sprintf("Estratégia Gemini: senioridade=%s remoto=%s fontes=%d exclusões=%d.", cfg.SuggestedSeniority, cfg.SuggestedRemotePolicy, len(cfg.SuggestedSources), len(cfg.SuggestedExcludeKeywords)))
-	a.appendPipelineLogLocked(fmt.Sprintf("Configuração: apps_per_day=%d (limite de candidatura/forja, não de coleta).", cfg.AppsPerDay))
+	appsPerDay := cfg.AppsPerDay
+	if appsPerDay <= 0 {
+		appsPerDay = 50
+	}
+	scraperCollectCap := appsPerDay * 2
+	a.appendPipelineLogLocked(fmt.Sprintf("Configuração: apps_per_day=%d, coleta máxima=%d vagas filtradas.", appsPerDay, scraperCollectCap))
 	a.pipelineMu.Unlock()
 
 	go func() {
@@ -1307,12 +1584,19 @@ func (a *App) StartAutomationPipeline(cfg ProfileDTO) bool {
 			return
 		}
 		scraperKeywords := buildScraperSearchKeywords(cfg)
+		appsPerDay := cfg.AppsPerDay
+		if appsPerDay <= 0 {
+			appsPerDay = 50
+		}
+		scraperCollectCap := appsPerDay * 2
+
 		scraperCmd.Env = mergeCommandEnv(os.Environ(), map[string]string{
 			"SEARCH_KEYWORDS":         scraperKeywords,
 			"SEARCH_EXCLUDE_KEYWORDS": strings.Join(cfg.SuggestedExcludeKeywords, ","),
 			"SEARCH_SENIORITY":        cfg.SuggestedSeniority,
 			"SEARCH_REMOTE_POLICY":    cfg.SuggestedRemotePolicy,
 			"SEARCH_SOURCES":          strings.Join(cfg.SuggestedSources, ","),
+			"SCRAPER_MAX_COLLECT":     strconv.Itoa(scraperCollectCap),
 		})
 		scraperOutput, scraperErr := runBackgroundCommandWithLogs(scraperCmd, func(line string) {
 			a.pipelineMu.Lock()
@@ -1500,6 +1784,14 @@ func ensureBootstrapEnv(appEnvPath string) {
 }
 
 func resolveFillerCommand() (*exec.Cmd, error) {
+	if _, lookErr := exec.LookPath("go"); lookErr == nil {
+		if projectRoot, ok := resolveProjectRootForStrict(filepath.Join("cmd", "filler")); ok {
+			cmd := exec.Command("go", "run", "./cmd/filler")
+			cmd.Dir = projectRoot
+			return cmd, nil
+		}
+	}
+
 	exePath, err := os.Executable()
 	if err == nil {
 		exeDir := filepath.Dir(exePath)
@@ -1695,6 +1987,101 @@ func shortenErr(err error) string {
 		return msg[:180] + "..."
 	}
 	return msg
+}
+
+func maskedSecretHint(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "vazia"
+	}
+	if len(trimmed) <= 4 {
+		return fmt.Sprintf("len=%d final=%s", len(trimmed), strings.Repeat("*", len(trimmed)))
+	}
+	return fmt.Sprintf("len=%d final=%s", len(trimmed), trimmed[len(trimmed)-4:])
+}
+
+func summarizeHTTPBody(body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+	preview := strings.TrimSpace(string(body))
+	if len(preview) > 240 {
+		preview = preview[:240] + "..."
+	}
+	return preview
+}
+
+func classifyProbeError(err error) (string, string) {
+	if err == nil {
+		return "✗ OFFLINE", "falha desconhecida"
+	}
+
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		if netErr.Timeout() {
+			return "✗ TIMEOUT", "timeout de rede ao validar credencial"
+		}
+		return "✗ OFFLINE", "falha de rede ao validar credencial"
+	}
+
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	switch {
+	case strings.Contains(msg, "no such host"):
+		return "✗ DNS", "não foi possível resolver o host da API"
+	case strings.Contains(msg, "connection refused"):
+		return "✗ CONEXÃO", "conexão recusada pelo destino"
+	case strings.Contains(msg, "timeout"):
+		return "✗ TIMEOUT", "timeout de rede ao validar credencial"
+	default:
+		return "✗ OFFLINE", shortenErr(err)
+	}
+}
+
+func classifyProbeHTTP(service string, statusCode int, body []byte) (string, string) {
+	bodyText := strings.ToLower(strings.TrimSpace(string(body)))
+	bodyPreview := summarizeHTTPBody(body)
+
+	switch {
+	case statusCode >= 200 && statusCode < 300:
+		return "✓ OK", "credencial válida e API acessível"
+	case statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden:
+		if strings.Contains(bodyText, "expired") || strings.Contains(bodyText, "expirada") || strings.Contains(bodyText, "expired key") {
+			return "✗ CHAVE EXPIRADA", "a API sinalizou chave expirada"
+		}
+		return "✗ CHAVE INVÁLIDA", "a API rejeitou autenticação (401/403)"
+	case statusCode == http.StatusTooManyRequests:
+		detail := "rate limit ativo (429)"
+		if bodyPreview != "" {
+			detail = detail + ": " + bodyPreview
+		}
+		return "⚠ RATE LIMIT", detail
+	case statusCode >= 500:
+		detail := fmt.Sprintf("%s indisponível (HTTP %d)", service, statusCode)
+		if bodyPreview != "" {
+			detail = detail + ": " + bodyPreview
+		}
+		return "✗ SERVIÇO", detail
+	default:
+		detail := fmt.Sprintf("resposta HTTP %d", statusCode)
+		if bodyPreview != "" {
+			detail = detail + ": " + bodyPreview
+		}
+		return "✗ ERRO", detail
+	}
+}
+
+func probeServiceAuth(service string, req *http.Request, client *http.Client) (string, string) {
+	resp, err := client.Do(req)
+	if err != nil {
+		return classifyProbeError(err)
+	}
+	defer resp.Body.Close()
+
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	if readErr != nil {
+		return "✗ ERRO", "falha ao ler resposta da API"
+	}
+	return classifyProbeHTTP(service, resp.StatusCode, body)
 }
 
 func diagnoseDatabaseStatus(database *sql.DB, dbPath, startupErr string) (string, string) {
@@ -2192,19 +2579,12 @@ Conteúdo do Email de Entrevista:
 
 	jsonValue, _ := json.Marshal(requestBody)
 
-	req, err := buildGeminiRequest("gemini-2.0-flash", apiKey, jsonValue)
-	if err != nil {
-		return fmt.Sprintf("Falha ao montar requisição Gemini: %v", err)
+	body, statusCode, reqErr := doGeminiRequestWithRetry("", apiKey, jsonValue, 4, 1200*time.Millisecond)
+	if reqErr != nil {
+		return fmt.Sprintf("Falha ao comunicar com Gemini: %v", reqErr)
 	}
-
-	resp, err := outboundHTTPClient.Do(req)
-	if err != nil {
-		return fmt.Sprintf("Falha ao comunicar com Gemini: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		return fmt.Sprintf("Erro da API Gemini: HTTP %d", resp.StatusCode)
+	if statusCode < 200 || statusCode >= 300 {
+		return fmt.Sprintf("Erro da API Gemini: HTTP %d", statusCode)
 	}
 
 	var result struct {
@@ -2217,7 +2597,7 @@ Conteúdo do Email de Entrevista:
 		} `json:"candidates"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&result); err != nil {
 		return fmt.Sprintf("Erro ao parsear resposta: %v", err)
 	}
 
@@ -2230,14 +2610,29 @@ Conteúdo do Email de Entrevista:
 
 // Verifica a saúde das integrações usadas pelo dashboard.
 func (a *App) GetSystemStatus() map[string]interface{} {
+	envFile, err := godotenv.Read(getAppEnvPath())
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.Printf("GetSystemStatus: falha ao ler .env: %v", err)
+	}
+	readSetting := func(key string) string {
+		if v, ok := envFile[key]; ok {
+			return strings.TrimSpace(v)
+		}
+		return strings.TrimSpace(os.Getenv(key))
+	}
+
 	status := map[string]interface{}{
 		"database":        "✓ OK",
 		"database_detail": "",
 		"database_path":   a.databasePath,
-		"cohere":          "✗ OFFLINE",
-		"groq":            "✗ OFFLINE",
-		"gemini":          "✗ OFFLINE",
+		"cohere":          "⚠ CHAVE AUSENTE",
+		"cohere_detail":   "COHERE_API_KEY não configurada",
+		"groq":            "⚠ CHAVE AUSENTE",
+		"groq_detail":     "GROQ_API_KEY não configurada",
+		"gemini":          "⚠ CHAVE AUSENTE",
+		"gemini_detail":   "GEMINI_API_KEY não configurada",
 		"imap":            "✗ OFFLINE",
+		"imap_detail":     "credenciais IMAP ausentes",
 	}
 
 	// Banco local com diagnóstico detalhado para facilitar troubleshooting na sidebar.
@@ -2246,63 +2641,73 @@ func (a *App) GetSystemStatus() map[string]interface{} {
 	status["database_detail"] = dbDetail
 
 	// Cohere
-	cohere := NewCohereClient()
-	if cohere.apiKey != "" {
+	cohereKey := readSetting("COHERE_API_KEY")
+	if cohereKey != "" {
+		status["cohere"] = "✗ OFFLINE"
+		status["cohere_detail"] = "tentando validar credencial na API Cohere (" + maskedSecretHint(cohereKey) + ")"
+		cohere := NewCohereClient()
+		cohere.apiKey = cohereKey
 		// Faz um teste rápido autenticado na API para validar conectividade.
 		req, err := http.NewRequest("GET", "https://api.cohere.ai/v1/models", nil)
 		if err == nil {
 			req.Header.Set("Authorization", "Bearer "+cohere.apiKey)
 			req.Header.Set("Accept", "application/json")
-			resp, err := cohere.client.Do(req)
-			if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 500 {
-				status["cohere"] = "✓ OK"
-				resp.Body.Close()
-			} else if resp != nil {
-				resp.Body.Close()
-			}
+			probe, detail := probeServiceAuth("Cohere", req, cohere.client)
+			status["cohere"] = probe
+			status["cohere_detail"] = detail
+		} else {
+			status["cohere"] = "✗ ERRO"
+			status["cohere_detail"] = "falha ao montar requisição de validação"
 		}
 	}
 
 	// Groq
-	groqKey := os.Getenv("GROQ_API_KEY")
+	groqKey := readSetting("GROQ_API_KEY")
 	if groqKey != "" {
+		status["groq"] = "✗ OFFLINE"
+		status["groq_detail"] = "tentando validar credencial na API Groq (" + maskedSecretHint(groqKey) + ")"
 		req, err := http.NewRequest("GET", "https://api.groq.com/openai/v1/models", nil)
 		if err == nil {
 			req.Header.Set("Authorization", "Bearer "+groqKey)
-			resp, err := outboundHTTPClient.Do(req)
-			if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 500 {
-				status["groq"] = "✓ OK"
-				resp.Body.Close()
-			} else if resp != nil {
-				resp.Body.Close()
-			}
+			probe, detail := probeServiceAuth("Groq", req, outboundHTTPClient)
+			status["groq"] = probe
+			status["groq_detail"] = detail
+		} else {
+			status["groq"] = "✗ ERRO"
+			status["groq_detail"] = "falha ao montar requisição de validação"
 		}
 	}
 
 	// Gemini
-	geminiKey := os.Getenv("GEMINI_API_KEY")
+	geminiKey := readSetting("GEMINI_API_KEY")
 	if geminiKey != "" {
+		status["gemini"] = "✗ OFFLINE"
+		status["gemini_detail"] = "tentando validar credencial na API Gemini (" + maskedSecretHint(geminiKey) + ")"
 		probe := []byte(`{"contents":[{"parts":[{"text":"ping"}]}]}`)
-		req, err := buildGeminiRequest("gemini-1.5-pro", geminiKey, probe)
+		req, err := buildGeminiRequest("", geminiKey, probe)
 		if err == nil {
-			resp, err := outboundHTTPClient.Do(req)
-			if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 500 {
-				status["gemini"] = "✓ OK"
-				resp.Body.Close()
-			} else if resp != nil {
-				resp.Body.Close()
-			}
+			probeState, detail := probeServiceAuth("Gemini", req, outboundHTTPClient)
+			status["gemini"] = probeState
+			status["gemini_detail"] = detail
+		} else {
+			status["gemini"] = "✗ ERRO"
+			status["gemini_detail"] = "falha ao montar requisição de validação"
 		}
 	}
 
 	// IMAP (somente estado de configuração para evitar login em loop no poll da sidebar)
-	imapServer := strings.TrimSpace(os.Getenv("IMAP_SERVER"))
-	imapUser := strings.TrimSpace(os.Getenv("IMAP_USER"))
-	imapPass := strings.TrimSpace(os.Getenv("IMAP_PASS"))
+	imapServer := readSetting("IMAP_SERVER")
+	imapUser := readSetting("IMAP_USER")
+	imapPass := readSetting("IMAP_PASS")
 	if imapServer != "" && imapUser != "" && imapPass != "" {
 		status["imap"] = "✓ CONFIGURADO"
+		status["imap_detail"] = "servidor, usuário e senha informados"
 	} else if imapServer != "" || imapUser != "" || imapPass != "" {
 		status["imap"] = "⚠ INCOMPLETO"
+		status["imap_detail"] = "preencha servidor, usuário e senha para teste IMAP"
+	} else {
+		status["imap"] = "⚠ CHAVE AUSENTE"
+		status["imap_detail"] = "credenciais IMAP não configuradas"
 	}
 
 	return status
@@ -2474,6 +2879,143 @@ func (a *App) SaveSettings(cfg SettingsDTO) bool {
 	return true
 }
 
+// ClearPersistedSecrets limpa segredos salvos no .env local para facilitar rotação de chaves.
+func (a *App) ClearPersistedSecrets() string {
+	envPath := getAppEnvPath()
+	existing, err := godotenv.Read(envPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.Printf("ClearPersistedSecrets: falha ao ler .env atual: %v", err)
+		return "Falha ao ler configurações persistidas."
+	}
+	if existing == nil {
+		existing = map[string]string{}
+	}
+
+	for _, key := range []string{"COHERE_API_KEY", "GROQ_API_KEY", "GEMINI_API_KEY", "IMAP_PASS"} {
+		existing[key] = ""
+	}
+
+	if writeErr := godotenv.Write(existing, envPath); writeErr != nil {
+		log.Printf("ClearPersistedSecrets: falha ao escrever .env: %v", writeErr)
+		return "Falha ao limpar segredos persistidos."
+	}
+	if chmodErr := os.Chmod(envPath, 0o600); chmodErr != nil {
+		log.Printf("ClearPersistedSecrets: aviso ao aplicar permissão restrita no .env: %v", chmodErr)
+	}
+
+	_ = os.Setenv("COHERE_API_KEY", "")
+	_ = os.Setenv("GROQ_API_KEY", "")
+	_ = os.Setenv("GEMINI_API_KEY", "")
+	_ = os.Setenv("IMAP_PASS", "")
+
+	return "Segredos limpos com sucesso."
+}
+
+func resolveSecretEnvKey(raw string) (string, string, bool) {
+	key := strings.ToLower(strings.TrimSpace(raw))
+	switch key {
+	case "cohere", "cohere_api_key":
+		return "COHERE_API_KEY", "Cohere", true
+	case "groq", "groq_api_key":
+		return "GROQ_API_KEY", "Groq", true
+	case "gemini", "gemini_api_key":
+		return "GEMINI_API_KEY", "Gemini", true
+	case "imap", "imap_pass", "imap_password":
+		return "IMAP_PASS", "IMAP Password", true
+	default:
+		return "", "", false
+	}
+}
+
+// ClearPersistedSecret limpa apenas um segredo persistido específico.
+func (a *App) ClearPersistedSecret(secret string) string {
+	envKey, label, ok := resolveSecretEnvKey(secret)
+	if !ok {
+		return "Segredo não suportado para limpeza."
+	}
+
+	envPath := getAppEnvPath()
+	existing, err := godotenv.Read(envPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.Printf("ClearPersistedSecret: falha ao ler .env atual: %v", err)
+		return "Falha ao ler configurações persistidas."
+	}
+	if existing == nil {
+		existing = map[string]string{}
+	}
+
+	existing[envKey] = ""
+
+	if writeErr := godotenv.Write(existing, envPath); writeErr != nil {
+		log.Printf("ClearPersistedSecret: falha ao escrever .env: %v", writeErr)
+		return "Falha ao limpar segredo persistido."
+	}
+	if chmodErr := os.Chmod(envPath, 0o600); chmodErr != nil {
+		log.Printf("ClearPersistedSecret: aviso ao aplicar permissão restrita no .env: %v", chmodErr)
+	}
+
+	_ = os.Setenv(envKey, "")
+	return label + " limpo com sucesso."
+}
+
+// VerifySingleCredential valida somente uma credencial de IA sem impactar as demais.
+func (a *App) VerifySingleCredential(service, apiKey string) map[string]string {
+	out := map[string]string{
+		"service": strings.ToLower(strings.TrimSpace(service)),
+		"status":  "✗ ERRO",
+		"detail":  "serviço não suportado",
+	}
+
+	trimmed := strings.TrimSpace(apiKey)
+	if trimmed == "" {
+		out["status"] = "⚠ CHAVE AUSENTE"
+		out["detail"] = "nenhuma chave informada para validação"
+		return out
+	}
+
+	switch out["service"] {
+	case "cohere":
+		req, err := http.NewRequest("GET", "https://api.cohere.ai/v1/models", nil)
+		if err != nil {
+			out["detail"] = "falha ao montar requisição de validação"
+			return out
+		}
+		req.Header.Set("Authorization", "Bearer "+trimmed)
+		req.Header.Set("Accept", "application/json")
+		state, detail := probeServiceAuth("Cohere", req, outboundHTTPClient)
+		out["status"] = state
+		out["detail"] = detail
+		return out
+
+	case "groq":
+		req, err := http.NewRequest("GET", "https://api.groq.com/openai/v1/models", nil)
+		if err != nil {
+			out["detail"] = "falha ao montar requisição de validação"
+			return out
+		}
+		req.Header.Set("Authorization", "Bearer "+trimmed)
+		state, detail := probeServiceAuth("Groq", req, outboundHTTPClient)
+		out["status"] = state
+		out["detail"] = detail
+		return out
+
+	case "gemini":
+		probe := []byte(`{"contents":[{"parts":[{"text":"ping"}]}]}`)
+		req, err := buildGeminiRequest("", trimmed, probe)
+		if err != nil {
+			out["detail"] = "falha ao montar requisição de validação"
+			return out
+		}
+		state, detail := probeServiceAuth("Gemini", req, outboundHTTPClient)
+		out["status"] = state
+		out["detail"] = detail
+		return out
+
+	default:
+		return out
+	}
+}
+
 func applyRuntimeSettingsEnv(envMap map[string]string) {
 	if envMap == nil {
 		return
@@ -2622,27 +3164,21 @@ CV Text:
 	}
 
 	jsonValue, _ := json.Marshal(requestBody)
-	req, reqErr := buildGeminiRequest("gemini-2.0-flash", apiKey, jsonValue)
+	body, statusCode, reqErr := doGeminiRequestWithRetry("", apiKey, jsonValue, 4, 1200*time.Millisecond)
 	if reqErr != nil {
-		log.Printf("UploadAndParseCV: Failed to build Gemini request: %v\n", reqErr)
-		baseProfile.ParseStatus = "error"
-		baseProfile.ParseErrorMessage = "Falha ao montar requisição para o Gemini."
-		return baseProfile
-	}
-
-	resp, httpErr := outboundHTTPClient.Do(req)
-	if httpErr != nil {
-		log.Printf("UploadAndParseCV: Gemini HTTP Call Failed: %v\n", httpErr)
+		log.Printf("UploadAndParseCV: Gemini call failed after retry: %v", reqErr)
 		baseProfile.ParseStatus = "error"
 		baseProfile.ParseErrorMessage = "Falha de comunicação com a API Gemini."
 		return baseProfile
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		log.Printf("UploadAndParseCV: Gemini returned HTTP %d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
+	if statusCode < 200 || statusCode >= 300 {
+		log.Printf("UploadAndParseCV: Gemini returned HTTP %d body=%s", statusCode, strings.TrimSpace(string(body)))
 		baseProfile.ParseStatus = "error"
-		baseProfile.ParseErrorMessage = fmt.Sprintf("Gemini retornou HTTP %d.", resp.StatusCode)
+		if statusCode == http.StatusTooManyRequests {
+			baseProfile.ParseErrorMessage = "Gemini em rate limit (HTTP 429). Aguarde alguns segundos e tente novamente."
+		} else {
+			baseProfile.ParseErrorMessage = fmt.Sprintf("Gemini retornou HTTP %d.", statusCode)
+		}
 		return baseProfile
 	}
 
@@ -2656,7 +3192,7 @@ CV Text:
 		} `json:"candidates"`
 	}
 
-	if decErr := json.NewDecoder(resp.Body).Decode(&result); decErr != nil {
+	if decErr := json.NewDecoder(bytes.NewReader(body)).Decode(&result); decErr != nil {
 		log.Printf("UploadAndParseCV: Failed to decode Gemini Response: %v", decErr)
 		baseProfile.ParseStatus = "error"
 		baseProfile.ParseErrorMessage = "Falha ao decodificar resposta do Gemini."
