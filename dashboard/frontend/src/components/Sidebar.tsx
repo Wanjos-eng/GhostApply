@@ -12,9 +12,13 @@ interface SystemStatus {
   database_detail: string;
   database_path: string;
   cohere: string;
+  cohere_detail: string;
   groq: string;
+  groq_detail: string;
   gemini: string;
+  gemini_detail: string;
   imap: string;
+  imap_detail: string;
 }
 
 const defaultSystemStatus: SystemStatus = {
@@ -22,9 +26,13 @@ const defaultSystemStatus: SystemStatus = {
   database_detail: "Aguardando diagnóstico...",
   database_path: "",
   cohere: "...",
+  cohere_detail: "",
   groq: "...",
+  groq_detail: "",
   gemini: "...",
-  imap: "..."
+  gemini_detail: "",
+  imap: "...",
+  imap_detail: ""
 };
 
 function normalizeSystemStatus(raw: unknown): SystemStatus {
@@ -43,9 +51,13 @@ function normalizeSystemStatus(raw: unknown): SystemStatus {
     database_detail: pick('database_detail'),
     database_path: pick('database_path'),
     cohere: pick('cohere'),
+    cohere_detail: pick('cohere_detail'),
     groq: pick('groq'),
+    groq_detail: pick('groq_detail'),
     gemini: pick('gemini'),
-    imap: pick('imap')
+    gemini_detail: pick('gemini_detail'),
+    imap: pick('imap'),
+    imap_detail: pick('imap_detail')
   };
 }
 
@@ -53,34 +65,36 @@ export function Sidebar({ activeScreen, setActiveScreen }: SidebarProps) {
   const [systemStatus, setSystemStatus] = useState<SystemStatus>(defaultSystemStatus);
 
   useEffect(() => {
-    let inFlight = false;
+    let isDisposed = false;
+    let requestSeq = 0;
 
     const fetchSystemStatus = async () => {
-      if (inFlight) {
-        return;
-      }
       if ((window as any).go?.main?.App?.GetSystemStatus) {
         try {
-          inFlight = true;
+          requestSeq += 1;
+          const currentSeq = requestSeq;
           const status = await (window as any).go.main.App.GetSystemStatus();
-          setSystemStatus(normalizeSystemStatus(status));
+          if (!isDisposed && currentSeq === requestSeq) {
+            setSystemStatus(normalizeSystemStatus(status));
+          }
         } catch (err) {
           console.error("Error loading system status:", err);
-          setSystemStatus(defaultSystemStatus);
-        } finally {
-          inFlight = false;
+          if (!isDisposed) {
+            setSystemStatus(defaultSystemStatus);
+          }
         }
       }
     };
 
     fetchSystemStatus();
-    const interval = setInterval(fetchSystemStatus, 30000); // Atualiza a cada 30s.
+    const interval = setInterval(fetchSystemStatus, 15000); // Atualiza a cada 15s.
     const onSettingsSaved = () => {
       fetchSystemStatus();
     };
     window.addEventListener('ghostapply:settings-saved', onSettingsSaved);
 
     return () => {
+      isDisposed = true;
       clearInterval(interval);
       window.removeEventListener('ghostapply:settings-saved', onSettingsSaved);
     };
@@ -140,19 +154,19 @@ export function Sidebar({ activeScreen, setActiveScreen }: SidebarProps) {
             )}
             <div className="flex justify-between text-[0.65rem] font-mono">
               <span className="text-zinc-500">Cohere</span>
-              <span className="text-blue-600 font-semibold">{systemStatus.cohere}</span>
+              <span className="text-blue-600 font-semibold" title={systemStatus.cohere_detail}>{systemStatus.cohere}</span>
             </div>
             <div className="flex justify-between text-[0.65rem] font-mono">
               <span className="text-zinc-500">Groq</span>
-              <span className="text-blue-600 font-semibold">{systemStatus.groq}</span>
+              <span className="text-blue-600 font-semibold" title={systemStatus.groq_detail}>{systemStatus.groq}</span>
             </div>
             <div className="flex justify-between text-[0.65rem] font-mono">
               <span className="text-zinc-500">Gemini</span>
-              <span className="text-blue-600 font-semibold">{systemStatus.gemini}</span>
+              <span className="text-blue-600 font-semibold" title={systemStatus.gemini_detail}>{systemStatus.gemini}</span>
             </div>
             <div className="flex justify-between text-[0.65rem] font-mono">
               <span className="text-zinc-500">IMAP</span>
-              <span className="text-blue-600 font-semibold">{systemStatus.imap}</span>
+              <span className="text-blue-600 font-semibold" title={systemStatus.imap_detail}>{systemStatus.imap}</span>
             </div>
           </div>
         </div>
