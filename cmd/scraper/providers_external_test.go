@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -173,5 +174,53 @@ func TestFilterVagasByStrategyWithStats(t *testing.T) {
 	}
 	if stats.DroppedBySource != 1 {
 		t.Fatalf("dropped source inesperado: %d", stats.DroppedBySource)
+	}
+}
+
+func TestGetEnvInt(t *testing.T) {
+	t.Setenv("SCRAPER_MAX_COLLECT", "120")
+	if got := getEnvInt("SCRAPER_MAX_COLLECT", 100); got != 120 {
+		t.Fatalf("esperava 120, veio %d", got)
+	}
+
+	t.Setenv("SCRAPER_MAX_COLLECT", "0")
+	if got := getEnvInt("SCRAPER_MAX_COLLECT", 100); got != 100 {
+		t.Fatalf("valor inválido deveria cair para fallback, veio %d", got)
+	}
+
+	t.Setenv("SCRAPER_MAX_COLLECT", "9999")
+	if got := getEnvInt("SCRAPER_MAX_COLLECT", 100); got != 500 {
+		t.Fatalf("valor deveria respeitar teto de segurança 500, veio %d", got)
+	}
+
+	if err := os.Unsetenv("SCRAPER_MAX_COLLECT"); err != nil {
+		t.Fatalf("falha ao limpar env: %v", err)
+	}
+	if got := getEnvInt("SCRAPER_MAX_COLLECT", 90); got != 90 {
+		t.Fatalf("env ausente deveria usar fallback, veio %d", got)
+	}
+}
+
+func TestSelectTopRelevantVagas(t *testing.T) {
+	vagas := []domain.Vaga{
+		{Titulo: "Senior Go Backend Engineer", Descricao: "Remote role with Go and distributed systems", Empresa: "Acme", URL: "https://www.linkedin.com/jobs/view/1"},
+		{Titulo: "Backend Platform Engineer", Descricao: "Golang backend, remote-first", Empresa: "Beta", URL: "https://www.linkedin.com/jobs/view/2"},
+		{Titulo: "Marketing Analyst", Descricao: "Growth and performance marketing", Empresa: "Gamma", URL: "https://www.linkedin.com/jobs/view/3"},
+		{Titulo: "Java Developer", Descricao: "Hybrid onsite role", Empresa: "Delta", URL: "https://www.linkedin.com/jobs/view/4"},
+	}
+
+	selected, dropped := selectTopRelevantVagas(vagas, "go backend", 2)
+	if len(selected) != 2 {
+		t.Fatalf("esperava 2 vagas após seleção, veio %d", len(selected))
+	}
+	if dropped <= 0 {
+		t.Fatalf("esperava ao menos 1 vaga descartada por baixa relevância")
+	}
+
+	for _, v := range selected {
+		blob := strings.ToLower(v.Titulo + " " + v.Descricao)
+		if !strings.Contains(blob, "go") && !strings.Contains(blob, "backend") {
+			t.Fatalf("vaga irrelevante não deveria permanecer: %+v", v)
+		}
 	}
 }
