@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -12,6 +13,31 @@ import (
 	"github.com/playwright-community/playwright-go"
 )
 
+func normalizeApplicationJobURL(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+
+	if strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://") {
+		return trimmed
+	}
+	if strings.HasPrefix(trimmed, "//") {
+		return "https:" + trimmed
+	}
+
+	base, _ := url.Parse("https://www.linkedin.com")
+	rel, err := url.Parse(trimmed)
+	if err != nil {
+		return trimmed
+	}
+	if rel.IsAbs() {
+		return trimmed
+	}
+
+	return base.ResolveReference(rel).String()
+}
+
 // processApplication executa o fluxo de candidatura automatizada para uma vaga.
 func processApplication(ctx playwright.BrowserContext, groqClient *llm.GroqClient, c domain.VagaComCandidatura) error {
 	page, err := ctx.NewPage()
@@ -19,11 +45,15 @@ func processApplication(ctx playwright.BrowserContext, groqClient *llm.GroqClien
 		return err
 	}
 	defer page.Close()
+	targetURL := normalizeApplicationJobURL(c.Vaga.URL)
+	if targetURL == "" {
+		return fmt.Errorf("url da vaga ausente")
+	}
 
-	if _, err := page.Goto(c.Vaga.URL, playwright.PageGotoOptions{
+	if _, err := page.Goto(targetURL, playwright.PageGotoOptions{
 		WaitUntil: playwright.WaitUntilStateDomcontentloaded,
 	}); err != nil {
-		return fmt.Errorf("falha ao navegar até a vaga: %w", err)
+		return fmt.Errorf("falha ao navegar até a vaga (%s): %w", targetURL, err)
 	}
 
 	pw.HumanSleep()
