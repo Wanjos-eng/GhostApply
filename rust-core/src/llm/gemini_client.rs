@@ -10,10 +10,13 @@
 use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use zeroize::Zeroize;
 
-const GEMINI_API_URL: &str =
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
+const GEMINI_API_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
+const DEFAULT_GEMINI_MODEL: &str = "gemini-2.0-flash";
+const MODEL_CACHE_TTL: Duration = Duration::from_secs(20 * 60);
 
 const GENERATION_PROMPT: &str = r#"Você é um especialista em currículos ATS-friendly e posicionamento estratégico.
 
@@ -65,11 +68,30 @@ pub struct GeminiResponsePart {
     pub text: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct GeminiListModelsResponse {
+    models: Option<Vec<GeminiModelInfo>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GeminiModelInfo {
+    name: String,
+    #[serde(default, rename = "supportedGenerationMethods")]
+    supported_generation_methods: Vec<String>,
+}
+
+#[derive(Debug, Default)]
+struct GeminiModelCache {
+    model: String,
+    expires_at: Option<Instant>,
+}
+
 // ── Cliente ─────────────────────────────────────────────────────────────────
 
 pub struct GeminiClient {
     client: Client,
     api_key: String,
+    model_cache: Mutex<GeminiModelCache>,
 }
 
 impl GeminiClient {
@@ -81,7 +103,111 @@ impl GeminiClient {
             .build()
             .context("GeminiClient: falha ao construir HTTP client com TLS 1.3")?;
 
-        Ok(Self { client, api_key })
+        Ok(Self {
+            client,
+            api_key,
+            model_cache: Mutex::new(GeminiModelCache::default()),
+        })
+    }
+
+    fn generate_content_url(model: &str) -> String {
+        format!(
+            "{}/models/{}:generateContent",
+            GEMINI_API_BASE_URL,
+            model.trim()
+        )
+    }
+
+    fn supports_generate_content(methods: &[String]) -> bool {
+        methods
+            .iter()
+            .any(|m| m.trim().eq_ignore_ascii_case("generateContent"))
+    }
+
+    fn invalidate_model_cache(&self) {
+        if let Ok(mut cache) = self.model_cache.lock() {
+            *cache = GeminiModelCache::default();
+        }
+    }
+
+    async fn fetch_generate_content_models(&self) -> Result<Vec<String>> {
+        let response = self
+            .client
+            .get(format!("{}/models?pageSize=100", GEMINI_API_BASE_URL))
+            .header("x-goog-api-key", &self.api_key)
+            .send()
+            .await
+            .context("GeminiClient: falha ao listar modelos")?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            anyhow::bail!(
+                "GeminiClient: list models retornou HTTP {} — {}",
+                status,
+                body
+            );
+        }
+
+        let payload: GeminiListModelsResponse = response
+            .json()
+            .await
+            .context("GeminiClient: falha ao deserializar list models")?;
+
+        let models = payload
+            .models
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|m| Self::supports_generate_content(&m.supported_generation_methods))
+            .map(|m| m.name.trim().trim_start_matches("models/").to_string())
+            .filter(|m| !m.is_empty())
+            .collect::<Vec<_>>();
+
+        Ok(models)
+    }
+
+    async fn resolve_model(&self, force_refresh: bool) -> String {
+        if !force_refresh {
+            if let Ok(cache) = self.model_cache.lock() {
+                if !cache.model.is_empty()
+                    && cache
+                        .expires_at
+                        .map(|exp| Instant::now() < exp)
+                        .unwrap_or(false)
+                {
+                    return cache.model.clone();
+                }
+            }
+        }
+
+        let selected = match self.fetch_generate_content_models().await {
+            Ok(models) => models
+                .into_iter()
+                .next()
+                .unwrap_or_else(|| DEFAULT_GEMINI_MODEL.to_string()),
+            Err(_) => DEFAULT_GEMINI_MODEL.to_string(),
+        };
+
+        if let Ok(mut cache) = self.model_cache.lock() {
+            cache.model = selected.clone();
+            cache.expires_at = Some(Instant::now() + MODEL_CACHE_TTL);
+        }
+
+        selected
+    }
+
+    async fn send_generate_content(
+        &self,
+        model: &str,
+        request: &GeminiRequest,
+    ) -> Result<reqwest::Response> {
+        self.client
+            .post(Self::generate_content_url(model))
+            .header("x-goog-api-key", &self.api_key)
+            .json(request)
+            .send()
+            .await
+            .context("GeminiClient: falha na requisição HTTP")
     }
 
     /// Gera um currículo adaptado interpolando currículo base + descrição da vaga.
@@ -106,21 +232,22 @@ impl GeminiClient {
             }],
         };
 
-        let response = self
-            .client
-            .post(GEMINI_API_URL)
-            .header("x-goog-api-key", &self.api_key)
-            .json(&request)
-            .send()
-            .await
-            .context("GeminiClient: falha na requisição HTTP")?;
+        let mut model = self.resolve_model(false).await;
+        let mut response = self.send_generate_content(&model, &request).await?;
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            self.invalidate_model_cache();
+            model = self.resolve_model(true).await;
+            response = self.send_generate_content(&model, &request).await?;
+        }
 
         let status = response.status();
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
             anyhow::bail!(
-                "GeminiClient: API retornou HTTP {} — {}",
-                status, body
+                "GeminiClient: API retornou HTTP {} (model={}) — {}",
+                status,
+                model,
+                body
             );
         }
 
