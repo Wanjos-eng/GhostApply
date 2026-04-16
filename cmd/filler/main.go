@@ -99,15 +99,24 @@ func run() error {
 	}
 
 	// Itera pelas candidaturas carregadas e executa o fluxo de automação.
+	successCount := 0
+	failureCount := 0
 	for _, c := range candidaturas {
 		err := processApplication(ctx, groqClient, c)
 		if err != nil {
 			log.Printf("filler: erro ao processar candidatura %s: %v", c.Candidatura.ID, err)
 			updateStatus(database, c.Candidatura.ID, domain.StatusErro)
+			failureCount++
 		} else {
 			log.Printf("filler: candidatura %s enviada com sucesso", c.Candidatura.ID)
 			updateStatus(database, c.Candidatura.ID, domain.StatusAplicada)
+			successCount++
 		}
+	}
+
+	log.Printf("filler: resumo de envio => sucesso=%d falhas=%d total=%d", successCount, failureCount, len(candidaturas))
+	if failureCount > 0 {
+		return fmt.Errorf("envio concluído com falhas: sucesso=%d falhas=%d total=%d", successCount, failureCount, len(candidaturas))
 	}
 
 	return nil
