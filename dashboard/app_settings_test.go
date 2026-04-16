@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"testing"
+	"time"
 )
 
 func TestMergeSettingsEnvPreservesExistingSecrets(t *testing.T) {
@@ -93,5 +94,36 @@ func TestBuildGeminiRequestUsesAPIKeyHeader(t *testing.T) {
 	}
 	if body.Len() == 0 {
 		t.Fatalf("corpo da requisição não deveria estar vazio")
+	}
+}
+
+func TestParseRetryAfterDelay(t *testing.T) {
+	if d, ok := parseRetryAfterDelay("3"); !ok || d != 3*time.Second {
+		t.Fatalf("retry-after em segundos deveria ser aceito, got=%v ok=%v", d, ok)
+	}
+
+	future := time.Now().Add(2 * time.Second).UTC().Format(time.RFC1123)
+	if d, ok := parseRetryAfterDelay(future); !ok || d <= 0 {
+		t.Fatalf("retry-after em data HTTP deveria ser aceito, got=%v ok=%v value=%q", d, ok, future)
+	}
+
+	if _, ok := parseRetryAfterDelay("abc"); ok {
+		t.Fatalf("valor inválido não deveria ser aceito")
+	}
+}
+
+func TestIsRetryableGeminiStatus(t *testing.T) {
+	retryable := []int{429, 500, 502, 503, 504}
+	for _, code := range retryable {
+		if !isRetryableGeminiStatus(code) {
+			t.Fatalf("status %d deveria ser retryable", code)
+		}
+	}
+
+	nonRetryable := []int{400, 401, 403, 404}
+	for _, code := range nonRetryable {
+		if isRetryableGeminiStatus(code) {
+			t.Fatalf("status %d não deveria ser retryable", code)
+		}
 	}
 }
