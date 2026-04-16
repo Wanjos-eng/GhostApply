@@ -18,6 +18,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/Wanjos-eng/GhostApply/internal/db"
@@ -42,6 +44,13 @@ type strategyFilterStats struct {
 	DroppedByExclude   int
 	DroppedBySeniority int
 	DroppedByRemote    int
+}
+
+type vagaRank struct {
+	vaga        domain.Vaga
+	titleScore  int
+	keywordHits int
+	remoteBoost int
 }
 
 func main() {
@@ -85,6 +94,7 @@ func run() error {
 	searchSeniority := getEnv("SEARCH_SENIORITY", "any")
 	searchRemotePolicy := getEnv("SEARCH_REMOTE_POLICY", "strict-remote")
 	searchSources := getEnv("SEARCH_SOURCES", "")
+	maxCollect := getEnvInt("SCRAPER_MAX_COLLECT", 100)
 	gupyBoards := getEnv("GUPY_COMPANY_URLS", "")
 	greenhouseBoards := getEnv("GREENHOUSE_BOARDS", "")
 	leverCompanies := getEnv("LEVER_COMPANIES", "")
@@ -92,6 +102,7 @@ func run() error {
 	strategy := parseSearchStrategy(excludeKeywords, searchSeniority, searchRemotePolicy, searchSources)
 	log.Printf("scraper: config keywords=%q country=%q", keywords, searchCountry)
 	log.Printf("scraper: strategy seniority=%q remote=%q excludes=%d sources=%d", strategy.seniority, strategy.remotePolicy, len(strategy.excludeKeywords), len(strategy.allowedSources))
+	log.Printf("scraper: max collect cap=%d", maxCollect)
 	log.Printf("scraper: providers enabled -> linkedin=true gupy=%t greenhouse=%t lever=%t",
 		strings.TrimSpace(gupyBoards) != "",
 		strings.TrimSpace(greenhouseBoards) != "",
@@ -142,7 +153,7 @@ func run() error {
 		linkedinQueries = []string{keywords}
 	}
 
-	collectionGoal := 100
+	collectionGoal := maxCollect
 
 	seenLinkedIn := map[string]struct{}{}
 
@@ -248,6 +259,16 @@ func run() error {
 	)
 	log.Printf("scraper: total após estratégia: %d", len(vagas))
 
+	vagas, droppedByRelevance := selectTopRelevantVagas(vagas, keywords, maxCollect)
+	if droppedByRelevance > 0 {
+		log.Printf("scraper: %d vagas removidas por baixa relevância keyword/role", droppedByRelevance)
+	}
+	if len(vagas) > maxCollect {
+		log.Printf("scraper: aplicando corte final para cap=%d (antes=%d)", maxCollect, len(vagas))
+		vagas = vagas[:maxCollect]
+	}
+	log.Printf("scraper: total final pronto para persistência: %d", len(vagas))
+
 	// ── Etapas 7 e 8: sanitiza e persiste ───────────────────────────────────
 	saved := 0
 	for i := range vagas {
@@ -295,6 +316,119 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func getEnvInt(key string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(raw)
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	if parsed > 500 {
+		return 500
+	}
+	return parsed
+}
+
+func keywordTerms(raw string) []string {
+	queries := buildLinkedInSearchQueries(raw)
+	out := make([]string, 0, len(queries)*3)
+	seen := map[string]struct{}{}
+	appendTerm := func(term string) {
+		term = strings.ToLower(strings.TrimSpace(term))
+		if term == "" || len(term) < 3 {
+			return
+		}
+		if _, ok := seen[term]; ok {
+			return
+		}
+		seen[term] = struct{}{}
+		out = append(out, term)
+	}
+
+	for _, query := range queries {
+		appendTerm(query)
+		for _, token := range strings.Fields(query) {
+			appendTerm(token)
+		}
+	}
+
+	if len(out) == 0 {
+		for _, token := range strings.Fields(raw) {
+			appendTerm(token)
+		}
+	}
+
+	return out
+}
+
+func scoreVagaByKeywords(v domain.Vaga, terms []string) (titleScore int, keywordHits int, remoteBoost int) {
+	if len(terms) == 0 {
+		return 0, 0, 0
+	}
+	title := strings.ToLower(v.Titulo)
+	body := strings.ToLower(v.Titulo + " " + v.Descricao + " " + v.Empresa)
+	for _, term := range terms {
+		if strings.Contains(title, term) {
+			titleScore++
+		}
+		if strings.Contains(body, term) {
+			keywordHits++
+		}
+	}
+	if strings.Contains(body, "remote") || strings.Contains(body, "remoto") || strings.Contains(body, "home office") {
+		remoteBoost = 1
+	}
+	return titleScore, keywordHits, remoteBoost
+}
+
+func selectTopRelevantVagas(vagas []domain.Vaga, keywords string, cap int) ([]domain.Vaga, int) {
+	if len(vagas) == 0 {
+		return vagas, 0
+	}
+	if cap <= 0 {
+		cap = len(vagas)
+	}
+
+	terms := keywordTerms(keywords)
+	ranked := make([]vagaRank, 0, len(vagas))
+	dropped := 0
+	for _, v := range vagas {
+		titleScore, keywordHits, remoteBoost := scoreVagaByKeywords(v, terms)
+		if len(terms) > 0 && titleScore == 0 && keywordHits < 2 {
+			dropped++
+			continue
+		}
+		ranked = append(ranked, vagaRank{vaga: v, titleScore: titleScore, keywordHits: keywordHits, remoteBoost: remoteBoost})
+	}
+
+	sort.SliceStable(ranked, func(i, j int) bool {
+		if ranked[i].titleScore != ranked[j].titleScore {
+			return ranked[i].titleScore > ranked[j].titleScore
+		}
+		if ranked[i].keywordHits != ranked[j].keywordHits {
+			return ranked[i].keywordHits > ranked[j].keywordHits
+		}
+		if ranked[i].remoteBoost != ranked[j].remoteBoost {
+			return ranked[i].remoteBoost > ranked[j].remoteBoost
+		}
+		return strings.ToLower(ranked[i].vaga.Titulo) < strings.ToLower(ranked[j].vaga.Titulo)
+	})
+
+	if len(ranked) > cap {
+		dropped += len(ranked) - cap
+		ranked = ranked[:cap]
+	}
+
+	out := make([]domain.Vaga, 0, len(ranked))
+	for _, item := range ranked {
+		out = append(out, item.vaga)
+	}
+
+	return out, dropped
 }
 
 func buildLinkedInSearchQueries(raw string) []string {
