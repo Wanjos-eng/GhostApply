@@ -17,6 +17,30 @@ import (
 const linkedInJobsBaseURL = "https://www.linkedin.com/jobs/search/"
 const linkedInSearchPageSize = 25
 
+func normalizeLinkedInURL(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	if strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://") {
+		return trimmed
+	}
+	if strings.HasPrefix(trimmed, "//") {
+		return "https:" + trimmed
+	}
+
+	base, _ := url.Parse("https://www.linkedin.com")
+	rel, err := url.Parse(trimmed)
+	if err != nil {
+		return trimmed
+	}
+	if rel.IsAbs() {
+		return trimmed
+	}
+
+	return base.ResolveReference(rel).String()
+}
+
 // NavigateToLinkedInSearch abre uma busca do LinkedIn filtrada para 100% remoto.
 //
 // # Intenção
@@ -186,7 +210,7 @@ func extractSingleCard(page playwright.Page, card playwright.Locator) (domain.Va
 			continue
 		}
 		if href, err := linkEl.GetAttribute("href"); err == nil && strings.TrimSpace(href) != "" {
-			jobURL = href
+			jobURL = normalizeLinkedInURL(href)
 			break
 		}
 	}
@@ -234,7 +258,8 @@ func extractSingleCard(page playwright.Page, card playwright.Locator) (domain.Va
 
 		linkEl := hiringTeamEl.Locator("a").First()
 		if href, err := linkEl.GetAttribute("href"); err == nil && href != "" {
-			recrutadorPerfil = &href
+			normalized := normalizeLinkedInURL(href)
+			recrutadorPerfil = &normalized
 		}
 	}
 
