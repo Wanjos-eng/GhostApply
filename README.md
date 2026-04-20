@@ -12,6 +12,18 @@ O projeto combina 3 stacks no mesmo produto:
 
 Interface desktop e ponte entre frontend/backend são feitas por Wails.
 
+## Screenshots do App
+
+Prints reais da interface em funcionamento:
+
+| Dashboard | Histórico |
+| --- | --- |
+| ![Dashboard](IMG/print1.png) | ![Histórico](IMG/print2.png) |
+
+| Vagas Prospectadas | Configurações |
+| --- | --- |
+| ![Vagas Prospectadas](IMG/print3.png) | ![Configurações](IMG/print4.png) |
+
 ## Release Oficial
 
 Download da release atual:
